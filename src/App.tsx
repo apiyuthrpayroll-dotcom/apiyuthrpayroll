@@ -1,0 +1,622 @@
+import React, { useState, useEffect } from 'react';
+import { Employee, Holiday, TimesheetEntry, SystemSettings } from './types';
+import { initialEmployees } from './data/employees';
+import { initialHolidays } from './data/holidays';
+import { initialTimesheetEntries } from './data/initialTimesheets';
+
+// Component Imports
+import Dashboard from './components/Dashboard';
+import TimesheetTable from './components/TimesheetTable';
+import EmployeeManager from './components/EmployeeManager';
+import HolidayList from './components/HolidayList';
+import PayrollSection from './components/PayrollSection';
+import IndividualReport from './components/IndividualReport';
+import SettingsSection from './components/SettingsSection';
+import HelpSection from './components/HelpSection';
+
+// Supabase sync tools
+import { 
+  supabase, 
+  dbFetchEmployees, 
+  dbFetchTimesheets, 
+  dbUpsertEmployee, 
+  dbDeleteEmployee, 
+  dbUpsertTimesheet, 
+  dbDeleteTimesheet, 
+  dbBulkInsertTimesheets, 
+  dbClearAllTimesheets 
+} from './lib/supabaseClient';
+
+import { 
+  BarChart4, FileText, Users, CalendarDays, 
+  HelpCircle, Sparkles, CheckSquare, Clock, ArrowRight,
+  Coins, UserCheck, Database, Sliders, CheckCircle2, Sun, Moon
+} from 'lucide-react';
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger' | 'employees' | 'holidays' | 'payroll' | 'individual-report' | 'settings' | 'help'>('ledger');
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean>(true);
+
+  // Theme Toggle: State default to 'light' for comfortable bright UI (สีโทนสว่าง สบายตา)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('thai_ot_theme');
+    return (saved as 'light' | 'dark') || 'light';
+  });
+
+  // Settings State: User configurable OT Rates and Wages
+  const [settings, setSettings] = useState<SystemSettings>(() => {
+    const saved = localStorage.getItem('thai_ot_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return {
+      ot15Rate: 1.5,
+      ot20Rate: 2.0,
+      ot30Rate: 3.0,
+      defaultDailyWage: 350,
+      defaultWorkHours: 8,
+    };
+  });
+
+  // Sync theme changes to local storage
+  useEffect(() => {
+    localStorage.setItem('thai_ot_theme', theme);
+  }, [theme]);
+
+  const handleUpdateSettings = (updated: SystemSettings) => {
+    setSettings(updated);
+    localStorage.setItem('thai_ot_settings', JSON.stringify(updated));
+  };
+
+  // Core State
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [entries, setEntries] = useState<TimesheetEntry[]>([]);
+
+  // Load from Supabase (or fallback to LocalStorage/pre-seeded)
+  useEffect(() => {
+    async function loadDataAndSync() {
+      try {
+        // 1. Fetch Employees
+        const dbEmps = await dbFetchEmployees();
+        if (dbEmps && dbEmps.length > 0) {
+          setEmployees(dbEmps);
+          localStorage.setItem('thai_ot_employees', JSON.stringify(dbEmps));
+        } else {
+          const savedEmployees = localStorage.getItem('thai_ot_employees');
+          if (savedEmployees) {
+            setEmployees(JSON.parse(savedEmployees));
+          } else {
+            setEmployees(initialEmployees);
+            localStorage.setItem('thai_ot_employees', JSON.stringify(initialEmployees));
+            // Opt-in populate Supabase so database starts with values
+            initialEmployees.forEach(emp => dbUpsertEmployee(emp));
+          }
+        }
+
+        // 2. Fetch Timesheets
+        const dbTimesheets = await dbFetchTimesheets();
+        if (dbTimesheets && dbTimesheets.length > 0) {
+          setEntries(dbTimesheets);
+          localStorage.setItem('thai_ot_entries', JSON.stringify(dbTimesheets));
+        } else {
+          const savedEntries = localStorage.getItem('thai_ot_entries');
+          if (savedEntries) {
+            setEntries(JSON.parse(savedEntries));
+          } else {
+            setEntries(initialTimesheetEntries);
+            localStorage.setItem('thai_ot_entries', JSON.stringify(initialTimesheetEntries));
+            // Opt-in populate Supabase so database starts with values
+            dbBulkInsertTimesheets(initialTimesheetEntries);
+          }
+        }
+
+        setSupabaseConnected(true);
+      } catch (e) {
+        setSupabaseConnected(false);
+        console.warn('⚠️ Fallback to browser storage as Supabase client is configuring...', e);
+      }
+
+      // 3. Holidays from local
+      const savedHolidays = localStorage.getItem('thai_ot_holidays');
+      if (savedHolidays) {
+        setHolidays(JSON.parse(savedHolidays));
+      } else {
+        setHolidays(initialHolidays);
+        localStorage.setItem('thai_ot_holidays', JSON.stringify(initialHolidays));
+      }
+    }
+    
+    loadDataAndSync();
+  }, []);
+
+  // Sync state helpers
+  const updateEmployeesAndSync = (newEmpList: Employee[]) => {
+    setEmployees(newEmpList);
+    localStorage.setItem('thai_ot_employees', JSON.stringify(newEmpList));
+  };
+
+  const updateHolidaysAndSync = (newHolidayList: Holiday[]) => {
+    setHolidays(newHolidayList);
+    localStorage.setItem('thai_ot_holidays', JSON.stringify(newHolidayList));
+  };
+
+  const updateEntriesAndSync = (newEntriesList: TimesheetEntry[]) => {
+    setEntries(newEntriesList);
+    localStorage.setItem('thai_ot_entries', JSON.stringify(newEntriesList));
+  };
+
+  // State Modification Actions (passed to subcomponents with instant Supabase push)
+  // 1. Employee Managers
+  const handleAddEmployee = async (emp: Employee) => {
+    const list = [emp, ...employees];
+    updateEmployeesAndSync(list);
+    await dbUpsertEmployee(emp);
+  };
+
+  const handleUpdateEmployee = async (id: string, updated: Partial<Employee>) => {
+    const list = employees.map(emp => emp.id === id ? { ...emp, ...updated } : emp);
+    updateEmployeesAndSync(list);
+
+    const matchObj = list.find(emp => emp.id === id);
+    if (matchObj) {
+      await dbUpsertEmployee(matchObj);
+    }
+
+    // If name or flat rate changed, cascade updates to timesheet entries referencing this employee
+    if (updated.employeeName || updated.isFlatRate !== undefined) {
+      const oldEmp = employees.find(e => e.id === id);
+      if (oldEmp) {
+        const updatedEntries = entries.map(entry => {
+          if (entry.employeeName === oldEmp.employeeName) {
+            return {
+              ...entry,
+              employeeName: updated.employeeName || entry.employeeName,
+              flatRate: updated.isFlatRate !== undefined ? updated.isFlatRate : entry.flatRate
+            };
+          }
+          return entry;
+        });
+        updateEntriesAndSync(updatedEntries);
+        
+        // Push cascaded ones sequentially in background
+        updatedEntries.forEach(entry => {
+          if (entry.employeeName === (updated.employeeName || oldEmp.employeeName)) {
+            dbUpsertTimesheet(entry);
+          }
+        });
+      }
+    }
+  };
+
+  const handleDeleteEmployee = async (id: string) => {
+    const list = employees.filter(emp => emp.id !== id);
+    updateEmployeesAndSync(list);
+    await dbDeleteEmployee(id);
+  };
+
+  // 2. Holiday Managers
+  const handleAddHoliday = (h: Holiday) => {
+    const list = [...holidays, h];
+    updateHolidaysAndSync(list);
+  };
+
+  const handleDeleteHoliday = (id: number) => {
+    const matched = holidays.filter(h => h.id !== id);
+    updateHolidaysAndSync(matched);
+  };
+
+  // 3. Timesheet Entries Managers
+  const handleAddEntry = async (entry: TimesheetEntry) => {
+    const list = [entry, ...entries];
+    updateEntriesAndSync(list);
+    await dbUpsertTimesheet(entry);
+  };
+
+  const handleUpdateEntry = async (id: string, updated: Partial<TimesheetEntry>) => {
+    const list = entries.map(e => e.id === id ? { ...e, ...updated } : e);
+    updateEntriesAndSync(list);
+
+    const matchObj = list.find(e => e.id === id);
+    if (matchObj) {
+      await dbUpsertTimesheet(matchObj);
+    }
+  };
+
+  const handleDeleteEntry = async (id: string) => {
+    const list = entries.filter(e => e.id !== id);
+    updateEntriesAndSync(list);
+    await dbDeleteTimesheet(id);
+  };
+
+  const handleBulkAddEntries = async (newParsedList: TimesheetEntry[]) => {
+    // 1. Identify any missing employees from the parsed entries list
+    const incomingEmpNames = Array.from(new Set(newParsedList.map(e => e.employeeName.trim().toUpperCase())));
+    
+    let updatedEmployees = [...employees];
+    const createdEmployees: Employee[] = [];
+
+    for (const rawName of incomingEmpNames) {
+      if (!rawName) continue;
+      
+      const found = updatedEmployees.some(emp => {
+        const normTarget = emp.employeeName.trim().toUpperCase();
+        return normTarget === rawName || normTarget.includes(rawName) || rawName.includes(normTarget);
+      });
+
+      if (!found) {
+        // Auto-create missing employee
+        const baseID = "EMP";
+        let numericPart = updatedEmployees.length + 1;
+        let nextID = `${baseID}${String(numericPart).padStart(3, '0')}`;
+        while (updatedEmployees.some(emp => emp.id === nextID) || createdEmployees.some(emp => emp.id === nextID)) {
+          numericPart++;
+          nextID = `${baseID}${String(numericPart).padStart(3, '0')}`;
+        }
+
+        const newEmp: Employee = {
+          id: nextID,
+          employeeName: rawName,
+          staffSalary: 0,
+          officeSalary: 0,
+          transportationRate: 0,
+          workshopRate: settings.defaultDailyWage || 700,
+          onsiteRate: (settings.defaultDailyWage || 700) + 50,
+          offshoreRate: 2500,
+          wfhRate: 0,
+          position: 'ช่างเทคนิค',
+          status: 'active',
+          bankName: '',
+          bankAccount: '',
+          studentLoan: 0,
+          workScheduleType: 'daily_worker',
+          isFlatRate: false
+        };
+
+        createdEmployees.push(newEmp);
+        updatedEmployees.push(newEmp);
+      }
+    }
+
+    // If new employees were created, save and sync them first
+    if (createdEmployees.length > 0) {
+      updateEmployeesAndSync(updatedEmployees);
+      for (const newEmp of createdEmployees) {
+        await dbUpsertEmployee(newEmp);
+      }
+    }
+
+    // 2. Adjust the parsedEntries' names if there were slight matching deviations, using the updated list of employees
+    const parsedWithCorrectNames = newParsedList.map(entry => {
+      const match = updatedEmployees.find(emp => {
+        const normTarget = emp.employeeName.trim().toUpperCase();
+        const normInput = entry.employeeName.trim().toUpperCase();
+        return normTarget === normInput || normTarget.includes(normInput) || normInput.includes(normTarget);
+      });
+      return {
+        ...entry,
+        employeeName: match ? match.employeeName : entry.employeeName.toUpperCase()
+      };
+    });
+
+    // 3. Save timesheets and sync
+    const list = [...parsedWithCorrectNames, ...entries];
+    updateEntriesAndSync(list);
+    await dbBulkInsertTimesheets(parsedWithCorrectNames);
+  };
+
+  const handleClearAllEntries = async () => {
+    updateEntriesAndSync([]);
+    await dbClearAllTimesheets();
+  };
+
+  const isDark = theme === 'dark';
+
+  return (
+    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-250 selection:bg-[#D4AF37]/30 selection:text-[#D4AF37] ${
+      isDark ? 'bg-[#0A0A0A] text-gray-200' : 'bg-[#F4F6F9] text-slate-800'
+    }`}>
+      {/* Visual Navigation Header Banner */}
+      <header className={`border-b shadow-md transition-colors duration-250 ${
+        isDark ? 'bg-[#0D0D0D] text-white border-white/10' : 'bg-white text-slate-800 border-slate-200'
+      }`}>
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-5 font-sans">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="p-1 px-1.5 bg-[#D4AF37] text-black rounded-sm text-[8px] font-extrabold uppercase tracking-widest leading-none">SYSTEM</span>
+                <h1 className="text-lg md:text-xl font-serif font-extrabold tracking-wide text-[#D4AF37] flex items-center gap-1.5">
+                  <Clock className="w-5 h-5 text-[#D4AF37] animate-spin-slow" />
+                  ระบบบัญชีคำนวณโอที <span className={`${isDark ? 'text-white' : 'text-slate-850'} font-light font-sans`}>Thai Timesheet & Payroll</span>
+                </h1>
+                
+                {/* Supabase connection badge notification */}
+                <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold ${
+                  isDark ? 'bg-emerald-950/50 border border-emerald-900/60 text-emerald-300' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                }`}>
+                  <Database className="w-3 h-3 text-emerald-555" />
+                  Supabase Connected
+                </div>
+              </div>
+              <p className={`text-[11px] max-w-2xl font-normal leading-relaxed ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+                คำนวณเวลาการทำงานสะสมช่างฟูลสแตก (ปกติ, ล่วงเวลา 1.5, 2.0, 3.0 เท่า) สลับอัตราบัญชีเงินรอบบิต ออกใบสลิปจ่าย ซิงค์ Supabase แบบเรียลไทม์
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 self-start md:self-auto text-xs">
+              {/* Theme Toggle Button Widget */}
+              <button
+                onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+                className={`p-2.5 rounded-full border transition-all duration-200 flex items-center justify-center cursor-pointer ${
+                  isDark 
+                    ? 'bg-[#141414] border-white/10 hover:bg-white/5 text-[#D4AF37]' 
+                    : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-amber-600 shadow-sm'
+                }`}
+                title={isDark ? "เปลี่ยนเป็นโหมดสว่างสบายตา" : "เปลี่ยนเป็นโหมดมืดล้ำลึก"}
+                id="theme-toggler"
+              >
+                {isDark ? <Sun className="w-4 h-4 animate-pulse" /> : <Moon className="w-4 h-4" />}
+              </button>
+
+              <div className={`flex items-center gap-4 p-3 rounded border transition-colors duration-250 ${
+                isDark ? 'bg-[#141414] border-white/10' : 'bg-slate-50 border-slate-200 shadow-xs'
+              }`}>
+                <div className="space-y-0.5 font-mono text-left">
+                  <div className="text-[8px] text-gray-500 uppercase tracking-widest font-sans font-bold">พนักงานรวม</div>
+                  <div className={`font-semibold text-xs ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                    <span className="text-[#D4AF37] font-extrabold">{employees.length}</span> คน
+                  </div>
+                </div>
+                <div className={`w-px h-6 ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />
+                <div className="space-y-0.5 font-mono text-left">
+                  <div className="text-[8px] text-gray-500 uppercase tracking-widest font-sans font-bold">บันทึกกะช่าง</div>
+                  <div className={`font-semibold text-xs ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                    <span className="text-emerald-500 font-extrabold">{entries.length}</span> เรคคอร์ด
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Level Tabs */}
+        <div className={`border-t transition-colors duration-250 ${
+          isDark ? 'border-white/10 bg-[#0D0D0D]/90' : 'border-slate-200 bg-slate-50'
+        }`}>
+          <div className="max-w-7xl mx-auto px-4 md:px-6">
+            <nav className="flex space-x-2 py-2 overflow-x-auto">
+              <button
+                id="tab-ledger"
+                onClick={() => setActiveTab('ledger')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'ledger'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                สมุดบันทึก Timesheet
+              </button>
+
+              <button
+                id="tab-payroll"
+                onClick={() => setActiveTab('payroll')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'payroll'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <Coins className="w-4 h-4" />
+                ดูคำนวนรายได้ ทั้งหมดทั้งเดือน ของพนักงาน
+              </button>
+
+              <button
+                id="tab-employees"
+                onClick={() => setActiveTab('employees')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'employees'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                ทะเบียนรายชื่อพนักงาน
+              </button>
+
+              <button
+                id="tab-individual-report"
+                onClick={() => setActiveTab('individual-report')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'individual-report'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <UserCheck className="w-4 h-4" />
+                รายงานเวลาพนักงานเดี่ยว (NEW)
+              </button>
+
+              <button
+                id="tab-dashboard"
+                onClick={() => setActiveTab('dashboard')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'dashboard'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <BarChart4 className="w-4 h-4" />
+                ภาพรวมสรุปโอที
+              </button>
+
+              <button
+                id="tab-holidays"
+                onClick={() => setActiveTab('holidays')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'holidays'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <CalendarDays className="w-4 h-4" />
+                ปฏิทินปูมวันหยุด
+              </button>
+
+              <button
+                id="tab-settings"
+                onClick={() => setActiveTab('settings')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'settings'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+                ตั้งค่าเรทโอทีทั่วไป (⚙️)
+              </button>
+
+              <button
+                id="tab-help"
+                onClick={() => setActiveTab('help')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'help'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <HelpCircle className="w-4 h-4" />
+                คู่มือการใช้งาน (Manual)
+              </button>
+            </nav>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Workspace Frame */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-6 font-sans">
+        {activeTab === 'ledger' && (
+          <div className="space-y-4">
+            <div className={`border p-4 rounded flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-250 ${
+              isDark 
+                ? 'bg-[#141414] border-[#D4AF37]/20 text-gray-250' 
+                : 'bg-white border-slate-200 shadow-xs text-slate-750'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-[#D4AF37]/10 rounded text-[#D4AF37] mt-0.5">
+                  <Sparkles className="w-4 h-4 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-850'}`}>เทคนิคประหยัดความจำ: นำเข้าตารางงานจาก Excel / Sheets ได้ทันที!</h3>
+                  <p className="text-[11px] text-gray-400 font-light mt-0.5">
+                    ก๊อปปี้คลิปบอร์ดแบบกลุ่มแถวตารางจาก Google Sheet เข้ามาวางได้ทันที ทุกอย่างจะถูกอัปโหลดขึ้น Supabase และลงรายละเอียดสมบูรณ์
+                  </p>
+                </div>
+              </div>
+              <button 
+                id="quick-start-import-assistant"
+                onClick={() => {
+                  const el = document.getElementById('open-import-modal-btn');
+                  if (el) el.click();
+                }}
+                className="bg-[#D4AF37] hover:bg-amber-400 text-black text-xs font-bold uppercase tracking-wider py-1.5 px-3.5 rounded-sm transition-colors cursor-pointer shrink-0"
+              >
+                นำเข้าข้อมูลด่วน
+              </button>
+            </div>
+            
+            <TimesheetTable
+              entries={entries}
+              employees={employees}
+              holidays={holidays}
+              onAddEntry={handleAddEntry}
+              onUpdateEntry={handleUpdateEntry}
+              onDeleteEntry={handleDeleteEntry}
+              onBulkAddEntries={handleBulkAddEntries}
+              onClearAllEntries={handleClearAllEntries}
+              isDark={isDark}
+            />
+          </div>
+        )}
+
+        {activeTab === 'payroll' && (
+          <PayrollSection
+            employees={employees}
+            entries={entries}
+            settings={settings}
+            isDark={isDark}
+          />
+        )}
+
+        {activeTab === 'individual-report' && (
+          <IndividualReport
+            employees={employees}
+            entries={entries}
+            settings={settings}
+            isDark={isDark}
+            holidays={holidays}
+            onAddEntry={handleAddEntry}
+            onUpdateEntry={handleUpdateEntry}
+            onDeleteEntry={handleDeleteEntry}
+          />
+        )}
+
+        {activeTab === 'dashboard' && (
+          <Dashboard
+            entries={entries}
+            employees={employees}
+            holidays={holidays}
+            isDark={isDark}
+          />
+        )}
+
+        {activeTab === 'employees' && (
+          <EmployeeManager
+            employees={employees}
+            onAddEmployee={handleAddEmployee}
+            onUpdateEmployee={handleUpdateEmployee}
+            onDeleteEmployee={handleDeleteEmployee}
+            isDark={isDark}
+          />
+        )}
+
+        {activeTab === 'holidays' && (
+          <HolidayList
+            holidays={holidays}
+            onAddHoliday={handleAddHoliday}
+            onDeleteHoliday={handleDeleteHoliday}
+            isDark={isDark}
+          />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsSection
+            settings={settings}
+            onUpdateSettings={handleUpdateSettings}
+            isDark={isDark}
+          />
+        )}
+
+        {activeTab === 'help' && (
+          <HelpSection
+            isDark={isDark}
+          />
+        )}
+      </main>
+
+      {/* Humble Footer */}
+      <footer className={`border-t py-6 text-center text-xs font-light font-mono transition-colors duration-250 ${
+        isDark ? 'bg-[#0D0D0D] border-white/10 text-gray-500' : 'bg-slate-100 border-slate-200 text-slate-500'
+      }`}>
+        <div className="max-w-7xl mx-auto px-4 space-y-1">
+          <p>© 2026 Thai Timesheet & OT Calculation Engine with Supabase. All Rights Reserved.</p>
+          <p className="text-[10px] text-gray-400">
+            ระบบคำนวณอัตราทำงานและวันจ่ายเงินเดือนแบบ Real-time เชื่อมโยงฐานข้อมูลคลาวด์ สอดคล้องตามเกณฑ์มาตรฐานความปลอดภัยสูง
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+}

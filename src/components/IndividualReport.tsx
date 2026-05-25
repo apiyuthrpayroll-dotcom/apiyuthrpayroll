@@ -1,0 +1,1669 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { Employee, TimesheetEntry, SystemSettings, Holiday } from '../types';
+import { 
+  Users, Calendar, Clock, Filter, Printer, Download, Save,
+  Search, FileSpreadsheet, ChevronRight, CheckCircle, Info, ArrowRight, UserCheck, RefreshCw, Plus, Check, Database
+} from 'lucide-react';
+import { calculateEntryOT } from '../utils/calculator';
+import { dbFetchSupplements, dbSaveSupplements } from '../lib/supabaseClient';
+
+interface IndividualReportProps {
+  employees: Employee[];
+  entries: TimesheetEntry[];
+  settings: SystemSettings;
+  isDark: boolean;
+  holidays: Holiday[];
+  onAddEntry: (entry: TimesheetEntry) => Promise<void>;
+  onUpdateEntry: (id: string, updated: Partial<TimesheetEntry>) => Promise<void>;
+  onDeleteEntry: (id: string) => Promise<void>;
+}
+
+interface SupplementData {
+  perdiem: number;
+  advance: number;
+  jobBonus: number;
+  remarkOverride: string;
+}
+
+export default function IndividualReport({ 
+  employees, 
+  entries, 
+  settings, 
+  isDark, 
+  holidays,
+  onAddEntry,
+  onUpdateEntry,
+  onDeleteEntry
+}: IndividualReportProps) {
+  // Navigation tabs: "master" (aggregate overview) or "drilldown" (IKM styled monthly timesheet)
+  const [activeSubTab, setActiveSubTab] = useState<'master' | 'drilldown'>('drilldown');
+
+  // Configured selected employee for drill-down
+  const [selectedEmpName, setSelectedEmpName] = useState<string>('');
+  
+  // Date Cutoff Range
+  const [startDate, setStartDate] = useState<string>('2026-04-21');
+  const [endDate, setEndDate] = useState<string>('2026-05-20');
+
+  // New states for Monthly View selector mode
+  const [isMonthlyMode, setIsMonthlyMode] = useState<boolean>(true);
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    return new Date().getFullYear() || 2026;
+  });
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => {
+    // 0-indexed: May is 4
+    return new Date().getMonth() ?? 4;
+  });
+
+  // Master View search keywords
+  const [masterSearch, setMasterSearch] = useState<string>('');
+
+  // Metadata custom editable input states
+  const [positionInput, setPositionInput] = useState<string>('');
+  const [locationInput, setLocationInput] = useState<string>('IKM Office');
+  const [employeeCodeInput, setEmployeeCodeInput] = useState<string>('');
+  const [projectInput, setProjectInput] = useState<string>('workshop');
+  
+  // Signature custom editable input states
+  const [issuedByInput, setIssuedByInput] = useState<string>('Ananta S.');
+  const [checkedByInput, setCheckedByInput] = useState<string>('Ananta S.');
+  const [approvedByInput, setApprovedByInput] = useState<string>('Apiyut N.');
+
+  // Notification feedback state
+  const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isSavingSupplements, setIsSavingSupplements] = useState<boolean>(false);
+  const [showSqlHelper, setShowSqlHelper] = useState<boolean>(false);
+  const [copiedSql, setCopiedSql] = useState<boolean>(false);
+
+  // Supplements local storage mapping: keyed by `${employeeId}_${date}`
+  const [supplements, setSupplements] = useState<Record<string, SupplementData>>(() => {
+    try {
+      const saved = localStorage.getItem('thai_ot_individual_supplements');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Draft Timesheet entries edit matrix to support typing work times without latency
+  const [draftEntries, setDraftEntries] = useState<Record<string, Partial<TimesheetEntry>>>({});
+
+  // Auto select first employee if empty
+  useEffect(() => {
+    if (!selectedEmpName && employees.length > 0) {
+      setSelectedEmpName(employees[0].employeeName);
+    }
+  }, [employees, selectedEmpName]);
+
+  const activeEmployee = useMemo(() => {
+    return employees.find(e => e.employeeName.toLowerCase().trim() === selectedEmpName.toLowerCase().trim()) || null;
+  }, [employees, selectedEmpName]);
+
+  // Sync profile metadata input fields when active employee changes
+  useEffect(() => {
+    if (activeEmployee) {
+      setPositionInput(activeEmployee.position || '');
+      setEmployeeCodeInput(activeEmployee.id || '');
+    }
+  }, [activeEmployee]);
+
+  // Synchronize Monthly View dropdowns -> startDate & endDate (21st of previous month to 20th of chosen month)
+  useEffect(() => {
+    if (isMonthlyMode) {
+      const prevDateObj = new Date(selectedYear, selectedMonth - 1, 21);
+      const startY = prevDateObj.getFullYear();
+      const startM = String(prevDateObj.getMonth() + 1).padStart(2, '0');
+      const startDayStr = `${startY}-${startM}-21`;
+
+      const curDateObj = new Date(selectedYear, selectedMonth, 20);
+      const endY = curDateObj.getFullYear();
+      const endM = String(curDateObj.getMonth() + 1).padStart(2, '0');
+      const endDayStr = `${endY}-${endM}-20`;
+      
+      setStartDate(startDayStr);
+      setEndDate(endDayStr);
+    }
+  }, [isMonthlyMode, selectedYear, selectedMonth]);
+
+  // Persist Supplements map to localStorage
+  useEffect(() => {
+    localStorage.setItem('thai_ot_individual_supplements', JSON.stringify(supplements));
+  }, [supplements]);
+
+  // Load supplements from Supabase if connected
+  useEffect(() => {
+    let active = true;
+    async function loadDbSupplements() {
+      try {
+        const data = await dbFetchSupplements();
+        if (!active) return;
+        if (data && data.length > 0) {
+          // Merge fetched database records into supplements
+          setSupplements(prev => {
+            const updated = { ...prev };
+            data.forEach((item: any) => {
+              // Standard key in our local state is based on actual employee code & date
+              const key = item.ID || `${item.EmployeeID}_${item.Date}`;
+              updated[key] = {
+                perdiem: parseFloat(item.Perdiem || 0),
+                advance: parseFloat(item.Advance || 0),
+                jobBonus: parseFloat(item.JobBonus || 0),
+                remarkOverride: item.Remark || ''
+              };
+            });
+            return updated;
+          });
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not load supplements from Supabase:', err);
+      }
+    }
+    loadDbSupplements();
+    return () => {
+      active = false;
+    };
+  }, [selectedEmpName, startDate, endDate, employeeCodeInput]);
+
+  // Filtered actual entries from database for selected employee & date range
+  const filteredEntries = useMemo(() => {
+    if (!selectedEmpName) return [];
+    return entries
+      .filter(entry => {
+        const matchEmpName = entry.employeeName.toLowerCase().trim() === selectedEmpName.toLowerCase().trim();
+        const inDateRange = entry.date >= startDate && entry.date <= endDate;
+        return matchEmpName && inDateRange;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [entries, selectedEmpName, startDate, endDate]);
+
+  // Generate complete physical dates day-by-day in range
+  const renderedDates = useMemo(() => {
+    const dates: string[] = [];
+    if (!startDate || !endDate) return dates;
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const current = new Date(start);
+
+    let safetyCount = 0;
+    while (current <= end && safetyCount < 366) {
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, '0');
+      const day = String(current.getDate()).padStart(2, '0');
+      dates.push(`${year}-${month}-${day}`);
+      current.setDate(current.getDate() + 1);
+      safetyCount++;
+    }
+    return dates;
+  }, [startDate, endDate]);
+
+  // Initialize draft entries whenever dates or source entries change
+  useEffect(() => {
+    if (!selectedEmpName) return;
+
+    const initialDrafts: Record<string, Partial<TimesheetEntry>> = {};
+    renderedDates.forEach(dStr => {
+      const existing = filteredEntries.find(e => e.date === dStr);
+      if (existing) {
+        initialDrafts[dStr] = { ...existing };
+      } else {
+        initialDrafts[dStr] = {
+          id: `draft-${dStr}`,
+          employeeName: selectedEmpName,
+          date: dStr,
+          project: projectInput || 'workshop',
+          timeIn: '',
+          timeOut: '',
+          lunchDeduct: 1,
+          lunchOT: 0,
+          flatRate: activeEmployee?.isFlatRate || false,
+          normalHours: 0,
+          ot15Hours: 0,
+          ot20Hours: 0,
+          ot30Hours: 0,
+          remark: '',
+          status: 'Pending'
+        };
+      }
+    });
+    setDraftEntries(initialDrafts);
+  }, [selectedEmpName, startDate, endDate, filteredEntries, activeEmployee, projectInput]);
+
+  // Calculate Employee standard hourly rate
+  const hourlyRate = useMemo(() => {
+    if (!activeEmployee) return 0;
+    const workHours = settings.defaultWorkHours || 8;
+    if (activeEmployee.workScheduleType === 'staff' || activeEmployee.workScheduleType === 'monthly_worker') {
+      const salary = activeEmployee.staffSalary || activeEmployee.officeSalary || 0;
+      return Number((salary / 30 / workHours).toFixed(2));
+    } else {
+      const dayWage = activeEmployee.workshopRate || settings.defaultDailyWage || 700;
+      return Number((dayWage / workHours).toFixed(2));
+    }
+  }, [activeEmployee, settings]);
+
+  // MASTER VIEW REPORT: Aggregate summary metrics for everyone in range
+  const masterAggregate = useMemo(() => {
+    return employees.map(emp => {
+      const matchEntries = entries.filter(ent => {
+        const matchName = ent.employeeName.toLowerCase().trim() === emp.employeeName.toLowerCase().trim();
+        const inRange = ent.date >= startDate && ent.date <= endDate;
+        return matchName && inRange;
+      });
+
+      const daysWorked = matchEntries.length;
+      let normal = 0;
+      let ot15 = 0;
+      let ot20 = 0;
+      let ot30 = 0;
+
+      matchEntries.forEach(ent => {
+        normal += ent.normalHours;
+        ot15 += ent.ot15Hours;
+        ot20 += ent.ot20Hours;
+        ot30 += ent.ot30Hours;
+      });
+
+      const otTotal = ot15 + ot20 + ot30;
+      const totalHours = normal + otTotal;
+
+      return {
+        id: emp.id,
+        name: emp.employeeName,
+        position: emp.position || 'พนักงาน',
+        scheduleType: emp.workScheduleType === 'staff' ? 'รายเดือน' : 'รายวัน',
+        daysWorked,
+        normalHours: Number(normal.toFixed(2)),
+        ot15Hours: Number(ot15.toFixed(2)),
+        ot20Hours: Number(ot20.toFixed(2)),
+        ot30Hours: Number(ot30.toFixed(2)),
+        otTotal: Number(otTotal.toFixed(2)),
+        totalHours: Number(totalHours.toFixed(2)),
+        isFlatRate: emp.isFlatRate
+      };
+    });
+  }, [employees, entries, startDate, endDate]);
+
+  const filteredMaster = useMemo(() => {
+    return masterAggregate.filter(m => {
+      return m.name.toLowerCase().includes(masterSearch.toLowerCase()) || 
+             m.id.toLowerCase().includes(masterSearch.toLowerCase()) ||
+             m.position.toLowerCase().includes(masterSearch.toLowerCase());
+    });
+  }, [masterAggregate, masterSearch]);
+
+  // Change specific cells on grid
+  const handleDraftChange = (date: string, field: keyof TimesheetEntry, value: any) => {
+    setDraftEntries(prev => {
+      const target = prev[date] || { date, employeeName: selectedEmpName };
+      const updated = { ...target, [field]: value };
+
+      // Make dynamic calculation of OT and normal hours instantly if working times or lunch flags change
+      if (updated.timeIn && updated.timeOut) {
+        const cal = calculateEntryOT(
+          date,
+          updated.timeIn,
+          updated.timeOut,
+          Number(updated.lunchDeduct ?? 1),
+          Number(updated.lunchOT ?? 0),
+          activeEmployee?.isFlatRate || false,
+          holidays,
+          projectInput,
+          activeEmployee?.workScheduleType,
+          activeEmployee?.position
+        );
+        updated.normalHours = cal.normalHours;
+        updated.ot15Hours = cal.ot15Hours;
+        updated.ot20Hours = cal.ot20Hours;
+        updated.ot30Hours = cal.ot30Hours;
+      } else {
+        updated.normalHours = 0;
+        updated.ot15Hours = 0;
+        updated.ot20Hours = 0;
+        updated.ot30Hours = 0;
+      }
+
+      return { ...prev, [date]: updated };
+    });
+  };
+
+  // Change supplementary values (Perdiem, Advance, Job Bonus, RemarkOverride)
+  const handleSupplementChange = (date: string, field: keyof SupplementData, value: any) => {
+    const key = `${employeeCodeInput}_${date}`;
+    setSupplements(prev => {
+      const existing = prev[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+      return {
+        ...prev,
+        [key]: { ...existing, [field]: value }
+      };
+    });
+  };
+
+  // Helper to click standard working hours shift (08:00 - 17:00, lunch deduct active)
+  const handlePresetStandardShift = (dStr: string) => {
+    handleDraftChange(dStr, 'timeIn', '08:00');
+    handleDraftChange(dStr, 'timeOut', '17:00');
+    handleDraftChange(dStr, 'lunchDeduct', 1);
+    handleDraftChange(dStr, 'lunchOT', 0);
+  };
+
+  // Bulk save current changes to Supabase
+  const handleSyncToSupabase = async () => {
+    if (!selectedEmpName) return;
+    setIsSaving(true);
+    setSaveStatus({ type: null, message: '' });
+
+    try {
+      let savedCount = 0;
+      for (const dStr of renderedDates) {
+        const draft = draftEntries[dStr];
+        if (!draft) continue;
+
+        // Skip saving completely blank columns unless the entry already existed in database
+        const hasTimeReg = draft.timeIn && draft.timeOut;
+        const existsInDB = filteredEntries.some(e => e.date === dStr);
+
+        if (hasTimeReg) {
+          if (existsInDB) {
+            const original = filteredEntries.find(e => e.date === dStr);
+            if (original && (
+              original.timeIn !== draft.timeIn ||
+              original.timeOut !== draft.timeOut ||
+              original.lunchDeduct !== draft.lunchDeduct ||
+              original.lunchOT !== draft.lunchOT ||
+              original.remark !== draft.remark
+            )) {
+              await onUpdateEntry(original.id, {
+                timeIn: draft.timeIn,
+                timeOut: draft.timeOut,
+                lunchDeduct: draft.lunchDeduct,
+                lunchOT: draft.lunchOT,
+                normalHours: draft.normalHours,
+                ot15Hours: draft.ot15Hours,
+                ot20Hours: draft.ot20Hours,
+                ot30Hours: draft.ot30Hours,
+                remark: draft.remark
+              });
+              savedCount++;
+            }
+          } else {
+            // Add new TimesheetEntry
+            const newEntry: TimesheetEntry = {
+              id: `ID-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              employeeName: selectedEmpName,
+              date: dStr,
+              project: projectInput || 'workshop',
+              timeIn: draft.timeIn || '08:00',
+              timeOut: draft.timeOut || '17:00',
+              lunchDeduct: Number(draft.lunchDeduct ?? 1),
+              lunchOT: Number(draft.lunchOT ?? 0),
+              flatRate: activeEmployee?.isFlatRate || false,
+              normalHours: draft.normalHours || 0,
+              ot15Hours: draft.ot15Hours || 0,
+              ot20Hours: draft.ot20Hours || 0,
+              ot30Hours: draft.ot30Hours || 0,
+              remark: draft.remark || '',
+              status: 'Approved',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            await onAddEntry(newEntry);
+            savedCount++;
+          }
+        } else if (existsInDB) {
+          // If hours were completely wiped out, remove entry
+          const original = filteredEntries.find(e => e.date === dStr);
+          if (original) {
+            await onDeleteEntry(original.id);
+            savedCount++;
+          }
+        }
+      }
+
+      // Automatically save supplements as well during bulk sync!
+      const supplementPayloads: any[] = [];
+      const empId = employeeCodeInput || activeEmployee?.id || '';
+      if (empId && activeEmployee) {
+        renderedDates.forEach(dStr => {
+          const key = `${empId}_${dStr}`;
+          const supp = supplements[key];
+          if (supp) {
+            supplementPayloads.push({
+              ID: key,
+              EmployeeID: empId,
+              EmployeeName: activeEmployee.employeeName,
+              Date: dStr,
+              Perdiem: Number(supp.perdiem || 0),
+              Advance: Number(supp.advance || 0),
+              JobBonus: Number(supp.jobBonus || 0),
+              Remark: supp.remarkOverride || ''
+            });
+          }
+        });
+        if (supplementPayloads.length > 0) {
+          await dbSaveSupplements(supplementPayloads);
+        }
+      }
+
+      setSaveStatus({
+        type: 'success',
+        message: `✓ บันทึกรายละเอียดการทำงานและค่าเบี้ยเลี้ยงรวม ${savedCount} รายการ ลง Supabase เรียบร้อยแล้ว!`
+      });
+    } catch (err: any) {
+      const errMsg = err?.message || '';
+      const isTableError = errMsg.includes('Invalid path') || 
+                           errMsg.toLowerCase().includes('not found') || 
+                           errMsg.toLowerCase().includes('does not exist') || 
+                           errMsg.includes('42P01') || 
+                           errMsg.includes('PGRST');
+      
+      if (isTableError) {
+        setShowSqlHelper(true);
+        setSaveStatus({
+          type: 'error',
+          message: `⚠️ ไม่สำเร็จ: ตาราง 'IndividualSupplements' ยังไม่ได้สร้างบน Supabase (ข้อมูลถูกบันทึกในคอมพิวเตอร์แบบออฟไลน์แล้ว!) กรุณาใช้โค้ด SQL ด้านล่างเพื่อสร้างตาราง`
+        });
+      } else {
+        setSaveStatus({
+          type: 'error',
+          message: `❌ เกิดข้อผิดพลาดขณะส่งบันทึก: ${errMsg || 'โปรดตรวจสอบสิทธิ์การเชื่อมต่อ'}`
+        });
+      }
+    } finally {
+      setIsSaving(false);
+      setTimeout(() => {
+        setSaveStatus({ type: null, message: '' });
+      }, 5000);
+    }
+  };
+
+  // Dedicated save for Supplements (Perdiem, Advance, Job Bonus, Remark)
+  const handleSaveSupplementsToSupabase = async () => {
+    if (!activeEmployee) {
+      setSaveStatus({ type: 'error', message: '❌ กรุณาเลือกพนักงานเพื่อบันทึกข้อมูลค่าเบี้ยเลี้ยง / เงินเบิก' });
+      return;
+    }
+    const empId = employeeCodeInput || activeEmployee.id || '';
+    if (!empId) {
+      setSaveStatus({ type: 'error', message: '❌ ไม่พบรหัสพนักงาน สำหรับการอ้างอิงข้อมูลเบี้ยเลี้ยง' });
+      return;
+    }
+
+    setIsSavingSupplements(true);
+    setSaveStatus({ type: null, message: '' });
+
+    try {
+      const payloads: any[] = [];
+      renderedDates.forEach(dStr => {
+        const key = `${empId}_${dStr}`;
+        const supp = supplements[key];
+        if (supp) {
+          payloads.push({
+            ID: key,
+            EmployeeID: empId,
+            EmployeeName: activeEmployee.employeeName,
+            Date: dStr,
+            Perdiem: Number(supp.perdiem || 0),
+            Advance: Number(supp.advance || 0),
+            JobBonus: Number(supp.jobBonus || 0),
+            Remark: supp.remarkOverride || ''
+          });
+        }
+      });
+
+      if (payloads.length === 0) {
+        setSaveStatus({
+          type: 'success',
+          message: 'ℹ️ ไม่มีข้อมูลค่าเบี้ยเลี้ยงหรือเงินเบิกสะสมที่จะบันทึก'
+        });
+        setIsSavingSupplements(false);
+        return;
+      }
+
+      await dbSaveSupplements(payloads);
+
+      setSaveStatus({
+        type: 'success',
+        message: `✓ บันทึกเฉพาะค่าเบี้ยเลี้ยง เงินเบิกสะสม และโบนัสงานสำหรับคุณ ${activeEmployee.employeeName} รวม ${payloads.length} วัน ลง Supabase สำเร็จ!`
+      });
+    } catch (err: any) {
+      const errMsg = err?.message || '';
+      const isTableError = errMsg.includes('Invalid path') || 
+                           errMsg.toLowerCase().includes('not found') || 
+                           errMsg.toLowerCase().includes('does not exist') || 
+                           errMsg.includes('42P01') || 
+                           errMsg.includes('PGRST');
+      
+      if (isTableError) {
+        setShowSqlHelper(true);
+        setSaveStatus({
+          type: 'error',
+          message: `⚠️ ไม่สำเร็จ: ตาราง 'IndividualSupplements' ยังไม่ได้สร้างบน Supabase (ข้อมูลถูกบันทึกในคอมพิวเตอร์ของคุณแล้ว) ดูวิธีแก้ด้วยตาราง SQL ด้านล่าง`
+        });
+      } else {
+        setSaveStatus({
+          type: 'error',
+          message: `❌ เกิดข้อผิดพลาดขณะบันทึกข้อมูลการเงิน: ${errMsg || 'สิทธิ์เข้าถึงฐานข้อมูลถูกปฏิเสธ'}`
+        });
+      }
+    } finally {
+      setIsSavingSupplements(false);
+      setTimeout(() => {
+        setSaveStatus({ type: null, message: '' });
+      }, 5000);
+    }
+  };
+
+  // Summary Metrics matching under-table blocks on the image
+  const computedSheetStats = useMemo(() => {
+    let daysOnDuty = 0;
+    let hoursOnDuty = 0;
+    let daysWorkedVal = 0;
+    let hoursWorkedVal = 0;
+    let leavesCount = 0;
+
+    let ot15Sum = 0;
+    let ot20Sum = 0;
+    let ot30Sum = 0;
+
+    renderedDates.forEach(dStr => {
+      const draft = draftEntries[dStr];
+      const key = `${employeeCodeInput}_${dStr}`;
+      const supp = supplements[key];
+
+      const hasWork = draft && draft.timeIn && draft.timeOut;
+      const isSatOrSun = new Date(dStr).getDay() === 0 || new Date(dStr).getDay() === 6;
+
+      if (hasWork) {
+        daysWorkedVal++;
+        hoursWorkedVal += (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
+        
+        ot15Sum += draft.ot15Hours || 0;
+        ot20Sum += draft.ot20Hours || 0;
+        ot30Sum += draft.ot30Hours || 0;
+      }
+
+      // Check leave
+      const lowerRemark = ((draft?.remark || '') + ' ' + (supp?.remarkOverride || '')).toLowerCase();
+      if (lowerRemark.includes('leave') || lowerRemark.includes('ลา') || lowerRemark.includes('annual')) {
+        leavesCount++;
+      } else if (isSatOrSun && !hasWork) {
+        // Weekend off
+        leavesCount++;
+      }
+    });
+
+    const otValueTotal = (ot15Sum * 1.5 + ot20Sum * 2.0 + ot30Sum * 3.0) * hourlyRate;
+
+    return {
+      daysInPeriod: renderedDates.length,
+      daysWorked: daysWorkedVal,
+      hoursWorked: Number(hoursWorkedVal.toFixed(2)),
+      daysOnDuty: '—',
+      hoursOnDuty: '—',
+      totalDayOffOrLeaves: leavesCount,
+      otValueTotal: Number(otValueTotal.toFixed(2))
+    };
+  }, [renderedDates, draftEntries, supplements, employeeCodeInput, hourlyRate]);
+
+  // Export Specific Employee Month details to CSV
+  const exportEmpCSV = () => {
+    if (!activeEmployee) return;
+
+    const headers = [
+      'Day',
+      'Date',
+      'Start Time',
+      'End Time',
+      'Lunch OT',
+      'Normal Hrs',
+      'OT 1.5 (hrs)',
+      'OT 2.0 (hrs)',
+      'OT 3.0 (hrs)',
+      'OT Value (THB)',
+      'Perdiem Expenses',
+      'Advance (THB)',
+      'Job Bonus (THB)',
+      'Remark'
+    ];
+
+    const rows = renderedDates.map(dStr => {
+      const draft = draftEntries[dStr] || {};
+      const key = `${employeeCodeInput}_${dStr}`;
+      const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+      
+      const dayName = new Date(dStr).toLocaleDateString('en-US', { weekday: 'long' });
+      const dayNum = new Date(dStr).getDate();
+
+      const itemOt15 = draft.ot15Hours || 0;
+      const itemOt20 = draft.ot20Hours || 0;
+      const itemOt30 = draft.ot30Hours || 0;
+      const otValueVal = (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0) * hourlyRate;
+
+      // Find public holiday
+      const holidayCheck = holidays.find(h => h.holidayDate === dStr);
+      const remarkText = supp.remarkOverride || draft.remark || (holidayCheck ? holidayCheck.holidayName : '');
+
+      return [
+        dayName,
+        dayNum,
+        draft.timeIn || '',
+        draft.timeOut || '',
+        draft.lunchOT || 0,
+        draft.normalHours || 0,
+        itemOt15,
+        itemOt20,
+        itemOt30,
+        otValueVal.toFixed(2),
+        supp.perdiem || 0,
+        supp.advance || 0,
+        supp.jobBonus || 0,
+        `"${remarkText}"`
+      ];
+    });
+
+    const csvContent = "\uFEFF" + [
+      `IKM TESTING (THAILAND) CO. LTD. - TIME SHEET`,
+      `Employee Code: ${employeeCodeInput}, Employee Name: ${activeEmployee.employeeName}`,
+      `Position: ${positionInput}, Location: ${locationInput}`,
+      `Cutoff: ${startDate} to ${endDate}`,
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Timesheet_Report_${employeeCodeInput}_${activeEmployee.employeeName}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Export ENTIRE MASTER SUMMARY REPORT to CSV
+  const exportMasterCSV = () => {
+    const headers = [
+      'รหัสพนักงาน',
+      'ชื่อพนักงาน',
+      'ตำแหน่ง',
+      'ประเภทพนักงาน',
+      'วันเข้าปฏิบัติงานจริง',
+      'ชั่วโมงทำงานปกติ (Normal Hrs)',
+      'OT 1.5 (ชั่วโมง)',
+      'OT 2.0 (ชั่วโมง)',
+      'OT 3.0 (ชั่วโมง)',
+      'รวมชั่วโมงโอทีสะสม',
+      'เวลารวมสะสมทั้งหมด (Grand Total)'
+    ];
+
+    const rows = masterAggregate.map(m => [
+      m.id,
+      m.name,
+      m.position,
+      m.scheduleType,
+      m.daysWorked,
+      m.normalHours,
+      m.ot15Hours,
+      m.ot20Hours,
+      m.ot30Hours,
+      m.otTotal,
+      m.totalHours
+    ]);
+
+    const csvContent = "\uFEFF" + [
+      `ตารางสรุปสรุปจำนวนชั่วโมงทำงานสะสมรายบุคคล (Individual Timesheet Core Report)`,
+      `รอบคัดกรองช่วงวันที่: ${startDate} ถึง ${endDate}`,
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Individual_Timesheet_Core_Report_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Month labels helper
+  const monthsList = [
+    { value: 0, label_en: 'January', label_th: 'มกราคม' },
+    { value: 1, label_en: 'February', label_th: 'กุมภาพันธ์' },
+    { value: 2, label_en: 'March', label_th: 'มีนาคม' },
+    { value: 3, label_en: 'April', label_th: 'เมษายน' },
+    { value: 4, label_en: 'May', label_th: 'พฤษภาคม' },
+    { value: 5, label_en: 'June', label_th: 'มิถุนายน' },
+    { value: 6, label_en: 'July', label_th: 'กรกฎาคม' },
+    { value: 7, label_en: 'August', label_th: 'สิงหาคม' },
+    { value: 8, label_en: 'September', label_th: 'กันยายน' },
+    { value: 9, label_en: 'October', label_th: 'ตุลาคม' },
+    { value: 10, label_en: 'November', label_th: 'พฤศจิกายน' },
+    { value: 11, label_en: 'December', label_th: 'ธันวาคม' }
+  ];
+
+  const activeMonthLabel = monthsList.find(m => m.value === selectedMonth)?.label_en || 'December';
+
+  // Card themes
+  const bgCard = isDark ? 'bg-[#141414] border-white/10 text-white' : 'bg-white border-slate-200 shadow-sm text-slate-800';
+  const inputBg = isDark ? 'bg-[#0D0D0D] border-white/10 text-white focus:border-[#D4AF37]' : 'bg-white border-slate-300 text-slate-800 focus:ring-1 focus:ring-[#D4AF37]';
+  const sectionTitleColor = isDark ? 'text-[#D4AF37]' : 'text-amber-600';
+
+  return (
+    <div className="space-y-6 animate-fade-in print:bg-white print:text-black print:m-0 print:p-0">
+      
+      {/* 1. REPORT CONTROL CENTER (Chrome - hidden when printing) */}
+      <div className={`p-5 rounded-sm border ${bgCard} print:hidden`}>
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div>
+            <h2 className={`text-base font-serif uppercase tracking-wider flex items-center gap-2 ${sectionTitleColor}`}>
+              <Users className="w-5 h-5 text-[#D4AF37]" />
+              ปฏิทินบันทึกเจาะลึกเฉพาะสัญญารายบุคคล (Individual Drill-Down Daily Logs)
+            </h2>
+            <p className="text-[11px] text-gray-500 mt-1">
+              สร้างตารางเวลา TIME SHEET รายเดือนตามสเป็คสัญญากลาง พัฒนารอยต่อประสานระบบรายงานสแกนสำหรับธนาคารและการพิมพ์ PDF
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setActiveSubTab('drilldown')}
+              className={`text-xs font-bold px-4 py-2 rounded-sm transition-all cursor-pointer ${
+                activeSubTab === 'drilldown'
+                  ? 'bg-[#D4AF37] text-black shadow-sm'
+                  : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border border-white/5'
+              }`}
+            >
+              🗓️ ปูมรายวันเดี่ยว (IKM Time Sheet)
+            </button>
+            <button
+              onClick={() => setActiveSubTab('master')}
+              className={`text-xs font-bold px-4 py-2 rounded-sm transition-all cursor-pointer ${
+                activeSubTab === 'master'
+                  ? 'bg-[#D4AF37] text-black shadow-sm'
+                  : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border border-white/5'
+              }`}
+            >
+              📊 ตารางรวมกำลังแรงงาน (Total Staff Matrix)
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic Context Filters Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-5 pt-5 border-t border-dashed border-white/10">
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">สับเปลี่ยนช่างพนักงาน (Employee)</label>
+            <select
+              value={selectedEmpName}
+              onChange={(e) => setSelectedEmpName(e.target.value)}
+              className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-hidden ${inputBg} font-semibold`}
+            >
+              {employees.map(emp => (
+                <option key={emp.id} value={emp.employeeName} className={isDark ? 'bg-black text-white' : 'bg-white text-slate-800'}>
+                  [{emp.id}] - {emp.employeeName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 font-mono">โหมดช่วงวันที่ประเมิน (Scope Mode)</label>
+            <div className="grid grid-cols-2 gap-1 bg-black/15 p-1 rounded-sm border border-white/5">
+              <button
+                onClick={() => setIsMonthlyMode(true)}
+                className={`text-[10px] font-bold py-1.5 rounded-sm transition-all cursor-pointer text-center ${
+                  isMonthlyMode ? 'bg-[#D4AF37] text-black' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                รายเดือนปฏิทิน
+              </button>
+              <button
+                onClick={() => setIsMonthlyMode(false)}
+                className={`text-[10px] font-bold py-1.5 rounded-sm transition-all cursor-pointer text-center ${
+                  !isMonthlyMode ? 'bg-[#D4AF37] text-black' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                ระบุช่วงวันที่เอง
+              </button>
+            </div>
+          </div>
+
+          {isMonthlyMode ? (
+            <>
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">เลือกปีคริสตศักราช (Year)</label>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-hidden ${inputBg}`}
+                >
+                  <option value={2025} className={isDark ? 'bg-black' : ''}>2025</option>
+                  <option value={2026} className={isDark ? 'bg-black' : ''}>2026</option>
+                  <option value={2027} className={isDark ? 'bg-black' : ''}>2027</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">เลือกเดือนปฏิบัติงาน (Month)</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                  className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-hidden ${inputBg}`}
+                >
+                  {monthsList.map(m => (
+                    <option key={m.value} value={m.value} className={isDark ? 'bg-black text-white' : 'bg-white text-slate-800'}>
+                      {m.label_th} ({m.label_en})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">วันที่เริ่มรอบ (From Date)</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-hidden ${inputBg}`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">วันที่สิ้นสุด (To Date)</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-hidden ${inputBg}`}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 2. TAB VIEW: MASTER AGGREGATE SCREEN */}
+      {activeSubTab === 'master' && (
+        <div className={`rounded-sm border ${bgCard} overflow-hidden print:hidden`}>
+          <div className="p-4 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-black/5">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-widest text-[#D4AF37]">
+                ตารางสรุปกำลังความถี่สะสมรายสัญญา (Total Staff Aggregate Matrix)
+              </h3>
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                ปูมรอบจ่ายสรุปชั่วโมงธรรมดา (Normal) และล่วงเวลาแยก (OT 1.5, OT 2.0, OT 3.0) บันทึกรายหัว
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="ค้นหาชื่อพนักงาน..."
+                  value={masterSearch}
+                  onChange={(e) => setMasterSearch(e.target.value)}
+                  className={`text-xs pl-8 pr-3 py-1.5 rounded-sm w-52 ${inputBg}`}
+                />
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-gray-505" />
+              </div>
+              
+              <button
+                onClick={exportMasterCSV}
+                className="flex items-center gap-1.5 bg-[#D4AF37] hover:bg-amber-400 text-black font-extrabold text-xs py-1.5 px-3 rounded-sm transition-all shadow-xs cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                ส่งออกสรุปบัญชีพยาน
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-black/45 text-[9px] font-mono tracking-widest uppercase text-gray-400 border-b border-white/5">
+                <tr>
+                  <th className="py-3 px-4 w-24">รหัส</th>
+                  <th className="py-3 px-4">ชื่อผู้ปฏิบัติงาน</th>
+                  <th className="py-3 px-4">ตำแหน่ง</th>
+                  <th className="py-3 px-4 text-center">ประเภท</th>
+                  <th className="py-3 px-4 text-center w-24">รวมจำนวนวัน</th>
+                  <th className="py-3 px-4 text-right">Normal Hrs</th>
+                  <th className="py-3 px-4 text-right text-amber-500">OT 1.5</th>
+                  <th className="py-3 px-4 text-right text-red-500">OT 2.0</th>
+                  <th className="py-3 px-4 text-right text-purple-400">OT 3.0</th>
+                  <th className="py-3 px-4 text-right">รวมชั่วโมงกะ</th>
+                  <th className="py-3 px-4 text-center w-28">เจาะประชากร</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 bg-black/[0.05]">
+                {filteredMaster.length > 0 ? (
+                  filteredMaster.map((m, idx) => (
+                    <tr key={idx} className="hover:bg-white/[0.01] transition-colors text-[11px]">
+                      <td className="py-3 px-4 font-mono font-bold text-[#D4AF37]">{m.id}</td>
+                      <td className="py-3 px-4 font-bold">
+                        <span>{m.name}</span>
+                        {m.isFlatRate && (
+                          <span className="ml-1.5 text-[8px] bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20 px-1 py-0.2 rounded-sm font-sans">Flat-12h</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-gray-450">{m.position}</td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`px-1.5 py-0.5 rounded-sm text-[8px] font-bold ${
+                          m.scheduleType === 'รายเดือน' 
+                            ? 'bg-blue-500/10 text-blue-500' 
+                            : 'bg-amber-500/10 text-amber-500'
+                        }`}>
+                          {m.scheduleType}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-semibold text-gray-400">{m.daysWorked} วัน</td>
+                      <td className="py-3 px-4 text-right font-mono text-gray-400">{m.normalHours.toFixed(1)}</td>
+                      <td className="py-3 px-4 text-right font-mono text-amber-500">{m.ot15Hours.toFixed(1)}</td>
+                      <td className="py-3 px-4 text-right font-mono text-red-400">{m.ot20Hours.toFixed(1)}</td>
+                      <td className="py-3 px-4 text-right font-mono text-purple-400">{m.ot30Hours.toFixed(1)}</td>
+                      <td className="py-3 px-4 text-right font-mono font-extrabold text-emerald-500">{m.totalHours.toFixed(1)} ชม.</td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          onClick={() => {
+                            setSelectedEmpName(m.name);
+                            setActiveSubTab('drilldown');
+                          }}
+                          className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500 text-amber-550 hover:text-black font-semibold text-[10px] rounded transition-all cursor-pointer inline-flex items-center gap-1"
+                        >
+                          ดึงปฏิทินเดี่ยว <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={11} className="py-12 text-center text-gray-500 font-serif">
+                      ไม่พบประวัติข้อมูลรอบปฏิบัติงานของพนักงานใดๆ
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3. TAB VIEW: DRILLDOWN (IKM TESTING TIME SHEET BRAND SPECIFIC) */}
+      {activeSubTab === 'drilldown' && (
+        <div className="space-y-4">
+          
+          {/* Action Header controls (Chrome - hidden in printing) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 bg-black/10 p-4 border rounded border-white/5 print:hidden">
+            
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                onClick={exportEmpCSV}
+                className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                ส่งออก CSV
+              </button>
+              
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                พิมพ์ตาราง PDF (Print)
+              </button>
+
+              <button
+                onClick={handleSyncToSupabase}
+                disabled={isSaving}
+                className="flex items-center gap-1.5 bg-[#D4AF37] hover:bg-amber-400 text-black font-extrabold text-xs py-2 px-5 rounded-sm transition-all cursor-pointer shadow-md shadow-amber-500/5 disabled:opacity-40"
+              >
+                {isSaving ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    กำลังประมวลซิงก์...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    💾 บันทึกลงฐานข้อมูล Supabase
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveSupplementsToSupabase}
+                disabled={isSavingSupplements}
+                className="flex items-center gap-1.5 bg-[#0D9488] hover:bg-[#0F766E] text-white font-extrabold text-xs py-2 px-5 rounded-sm transition-all cursor-pointer shadow-md disabled:opacity-40"
+              >
+                {isSavingSupplements ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    กำลังบันทึกเบี้ยเลี้ยง...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    💵 บันทึกเฉพาะค่าเบี้ยเลี้ยง & Remark (Supabase)
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowSqlHelper(!showSqlHelper)}
+                className="flex items-center gap-1.5 bg-zinc-850 hover:bg-zinc-800 text-[#D4AF37] font-bold text-xs py-2 px-4 rounded-sm transition-all border border-amber-900/20 cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5 text-[#D4AF37]" />
+                {showSqlHelper ? 'ปิดโค้ด SQL ✕' : '📜 วิธีตั้งค่าเชื่อมต่อ SQL'}
+              </button>
+            </div>
+          </div>
+
+          {/* Feedback status notifications (Chrome - hidden in printing) */}
+          {saveStatus.type && (
+            <div className={`p-3.5 rounded-sm text-xs border print:hidden font-medium ${
+              saveStatus.type === 'success' 
+                ? 'bg-emerald-950/20 text-emerald-400 border-emerald-900/30' 
+                : 'bg-red-950/20 text-red-400 border-red-900/30'
+            }`}>
+              {saveStatus.message}
+            </div>
+          )}
+
+          {/* SQL database Schema helper */}
+          {showSqlHelper && (
+            <div className="p-5 bg-zinc-900/95 border border-amber-500/20 rounded-sm text-xs text-gray-300 space-y-3 print:hidden shadow-xl animate-fade-in max-w-[1000px] mx-auto w-full">
+              <div className="flex items-center justify-between border-b border-amber-500/10 pb-2">
+                <span className="font-bold text-amber-400 flex items-center gap-2 uppercase tracking-wide">
+                  <Database className="w-4 h-4 text-amber-500" />
+                  คำสั่งสร้างตาราง SQL (Table Schema for Supabase SQL Editor)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSqlHelper(false)}
+                  className="text-gray-500 hover:text-white transition-colors cursor-pointer text-[10.5px]"
+                >
+                  ✕ ปิดหน้านี้
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                เนื่องจากเป็นตารางใหม่สำหรับเก็บบันทึกค่าใช้จ่ายเดินทาง เงินเบิกสำรองสะสม และโบนัสงานรายบุคคล 
+                กรุณาเชื่อมต่อโดยนำคิวรี่ SQL ล่างนี้ไปรันที่ <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="text-sky-400 underline font-bold hover:text-sky-300">Supabase Dashboard ↗</a> 
+                ช่องเมนู <strong className="text-white font-mono">SQL Editor (New Query)</strong> แล้วกดโปรแกรม <strong className="text-white font-mono">Run</strong>:
+              </p>
+              
+              <div className="relative">
+                <pre className="p-4 bg-black/60 rounded-xs text-[#0D9488] font-mono text-[11px] leading-relaxed overflow-x-auto border border-white/5 select-all max-h-64 scrollbar-thin">
+{`-- 1. สร้างตารางเก็บเบี้ยเลี้ยง / เงินเบิก และบันทึกเพิ่มเติมรายบุคคลรายวัน
+CREATE TABLE IF NOT EXISTS public."IndividualSupplements" (
+    "ID" text PRIMARY KEY,                                  -- คีย์หลักอ้างอิงรหัสผสม เช่น EMP001_2026-05-20
+    "EmployeeID" text NOT NULL,                             -- รหัสพนักงาน
+    "EmployeeName" text NOT NULL,                           -- ชื่อพนักงาน
+    "Date" DATE NOT NULL,                                   -- วันที่ทำงาน
+    "Perdiem" NUMERIC(12, 2) DEFAULT 0.00,                  -- ค่าเดินทาง / เบี้ยเลี้ยง
+    "Advance" NUMERIC(12, 2) DEFAULT 0.00,                  -- เงินเบิกสำรองล่วงหน้า
+    "JobBonus" NUMERIC(12, 2) DEFAULT 0.00,                 -- โบนัสจากหน้างานพิเศษ
+    "Remark" TEXT,                                          -- หมายเหตุเพิ่มเติมสำหรับวันนั้น
+    "CreatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    "UpdatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- 2. ปิดการควบคุมระดับแถว (RLS) เพื่อให้ระบบสรุปเงินสามารถอัปโหลดข้อมูลได้รวดเร็ว
+ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;
+
+-- 3. เสริมคอมเมนต์คำอธิบายตาราง
+COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันทึกค่าเบี้ยเลี้ยง เงินเบิกสำรองสะสม และโบนัสหน้างานพิเศษรายบุคคลรายวัน';`}
+                </pre>
+                <div className="absolute top-2 right-2 flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`-- 1. สร้างตารางเก็บเบี้ยเลี้ยง / เงินเบิก และบันทึกเพิ่มเติมรายบุคคลรายวัน
+CREATE TABLE IF NOT EXISTS public."IndividualSupplements" (
+    "ID" text PRIMARY KEY,
+    "EmployeeID" text NOT NULL,
+    "EmployeeName" text NOT NULL,
+    "Date" DATE NOT NULL,
+    "Perdiem" NUMERIC(12, 2) DEFAULT 0.00,
+    "Advance" NUMERIC(12, 2) DEFAULT 0.00,
+    "JobBonus" NUMERIC(12, 2) DEFAULT 0.00,
+    "Remark" TEXT,
+    "CreatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    "UpdatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- 2. ปิดการควบคุมระดับแถว (RLS) เพื่อให้ระบบสรุปเงินสามารถอัปโหลดข้อมูลได้รวดเร็ว
+ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;
+
+-- 3. เสริมคอมเมนต์คำอธิบายตาราง
+COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันทึกค่าเบี้ยเลี้ยง เงินเบิกสำรองสะสม และโบนัสหน้างานพิเศษรายบุคคลรายวัน';`);
+                      setCopiedSql(true);
+                      setTimeout(() => setCopiedSql(false), 2000);
+                    }}
+                    className={`text-white text-[10px] font-extrabold py-1 px-3 rounded-xs transition-all cursor-pointer shadow-sm ${
+                      copiedSql ? 'bg-emerald-600' : 'bg-[#0D9488] hover:bg-[#0F766E]'
+                    }`}
+                  >
+                    {copiedSql ? 'คัดลอกเรียบร้อยแล้ว! ✓' : '📄 คัดลอกคำสั่ง SQL'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* THE OFFICIAL RECORD SHEET (WHITE PAPER TYPE - PRINT FRIENDLY) */}
+          {/* ======================================================== */}
+          <div className="bg-white text-slate-900 rounded-sm p-6 shadow-xl border border-slate-300 font-sans print:p-0 print:border-none print:shadow-none print:text-black print:bg-white w-full max-w-[1000px] mx-auto overflow-x-auto">
+            
+            {/* SHEET HEADER LAYOUT */}
+            <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-4">
+              
+              {/* Logo block (IKM Testing Left aligned) */}
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-black text-white font-extrabold flex flex-col justify-center items-center rounded-xs shrink-0 tracking-tighter" style={{ fontFamily: 'monospace' }}>
+                  <div className="text-[14px] leading-3 font-black">I K M</div>
+                  <div className="text-[7px] border-t border-white/50 px-0.5 mt-1">TESTING</div>
+                </div>
+                <div className="text-left">
+                  <h1 className="text-sm font-black tracking-wider uppercase font-sans">IKM TESTING (THAILAND) CO., LTD.</h1>
+                  <p className="text-[9px] text-slate-500 leading-tight">OFFICIAL REPRESENTATIVE IN KINGDOM OF THAILAND</p>
+                </div>
+              </div>
+
+              {/* Document monthly designation label boxed */}
+              <div className="text-right shrink-0">
+                <div className="border-2 border-dashed border-slate-400 px-4 py-2 text-center rounded bg-slate-50 font-bold max-w-48">
+                  <span className="text-xs uppercase tracking-widest text-slate-500 block font-mono">Month Indicator</span>
+                  <span className="text-sm text-slate-900 font-extrabold font-serif uppercase tracking-wider">{activeMonthLabel}-{selectedYear}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Centered Document Title */}
+            <div className="text-center mb-6">
+              <h2 className="text-lg font-black tracking-widest uppercase border-b border-slate-900 inline-block px-8 pb-1" style={{ letterSpacing: '0.25em' }}>
+                TIME SHEET
+              </h2>
+            </div>
+
+            {/* METADATA TWO COLUMN GRID */}
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3.5 mb-6 text-xs text-left" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
+              
+              {/* Left-hand profiles */}
+              <div className="space-y-3">
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Name-Surname :</span>
+                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1 text-[13px]">
+                    {selectedEmpName || '—'}
+                  </span>
+                </div>
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Position :</span>
+                  <input
+                    type="text"
+                    value={positionInput}
+                    onChange={(e) => setPositionInput(e.target.value)}
+                    className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-bold bg-transparent text-slate-900 text-xs focus:outline-hidden pl-1 hover:bg-slate-50 print:border-b"
+                  />
+                </div>
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Location :</span>
+                  <input
+                    type="text"
+                    value={locationInput}
+                    onChange={(e) => setLocationInput(e.target.value)}
+                    className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold bg-transparent text-slate-900 text-xs focus:outline-hidden pl-1 hover:bg-slate-50 print:border-b"
+                  />
+                </div>
+              </div>
+
+              {/* Right-hand profiles */}
+              <div className="space-y-3">
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Employee Code :</span>
+                  <input
+                    type="text"
+                    value={employeeCodeInput}
+                    onChange={(e) => setEmployeeCodeInput(e.target.value)}
+                    className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-bold bg-transparent text-slate-900 text-xs focus:outline-hidden pl-1 hover:bg-slate-50 print:border-b"
+                  />
+                </div>
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Date Submitted :</span>
+                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-bold text-slate-900 pl-1">
+                    {endDate.split('-').reverse().join('/')}
+                  </span>
+                </div>
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Project / Services :</span>
+                  <input
+                    type="text"
+                    value={projectInput}
+                    onChange={(e) => setProjectInput(e.target.value)}
+                    className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold bg-transparent text-slate-900 text-xs focus:outline-hidden pl-1 hover:bg-slate-50 print:border-b"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ======================================================== */}
+            {/* THE SPREADSHEET MATRIX */}
+            {/* ======================================================== */}
+            <div className="border border-slate-400 overflow-hidden mb-6 rounded-xs">
+              <table className="w-full text-left text-xs text-slate-900 table-fixed border-collapse">
+                
+                {/* DOUBLE DEPTH THEAD */}
+                <thead className="bg-slate-100 text-slate-700 text-[10px] uppercase font-bold text-center border-b border-slate-400 font-mono tracking-tight">
+                  <tr className="border-b border-slate-400 divide-x divide-slate-400">
+                    <th className="py-2.5 px-1.5 w-[100px] shrink-0" rowSpan={2}>Day</th>
+                    <th className="py-2.5 px-0.5 w-[45px] shrink-0" rowSpan={2}>Date</th>
+                    <th className="py-1.5 px-1 uppercase tracking-wider text-[9px] bg-slate-50" colSpan={3}>Working Time</th>
+                    <th className="py-1.5 px-1 uppercase tracking-wider text-[9px] bg-slate-50" colSpan={4}>Overtime</th>
+                    <th className="py-2 px-1 text-[9px] w-[75px]" rowSpan={2}>Perdiem<br/><span className="text-[7.5px] font-sans">/ Travel Exp</span></th>
+                    <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Advance</th>
+                    <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Job Bonus</th>
+                    <th className="py-2.5 px-2 w-[150px]" rowSpan={2}>Remark</th>
+                  </tr>
+                  <tr className="divide-x divide-slate-450 divide-slate-400 text-[9.5px]">
+                    <th className="py-1 px-1 w-[48px] font-mono">Start</th>
+                    <th className="py-1 px-1 w-[48px] font-mono">End</th>
+                    <th className="py-1 px-1 w-[45px] text-sky-700">Total</th>
+                    
+                    <th className="py-1 px-1 w-[35px] text-emerald-700">1.0</th>
+                    <th className="py-1 px-1 w-[35px] text-amber-700">1.5</th>
+                    <th className="py-1 px-1 w-[35px] text-red-700">3.0</th>
+                    <th className="py-1 px-1 w-[70px] text-slate-800 font-sans">Value</th>
+                  </tr>
+                </thead>
+
+                {/* SPREADSHEET BODY */}
+                <tbody className="divide-y divide-slate-200">
+                  {renderedDates.map((dStr, idx) => {
+                    const draft = draftEntries[dStr] || {};
+                    const key = `${employeeCodeInput}_${dStr}`;
+                    const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+
+                    const dateObj = new Date(dStr);
+                    const dayNum = dateObj.getDate();
+                    const dayOfWeekStr = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+                    
+                    const dayVal = dateObj.getDay();
+                    const isSunday = dayVal === 0;
+                    const isSaturday = dayVal === 6;
+
+                    // Public Holiday matching check
+                    const optHoliday = holidays.find(h => h.holidayDate === dStr);
+                    const isPubHoliday = !!optHoliday;
+
+                    // Compute specific OT Value pay
+                    const itemOt15 = draft.ot15Hours || 0;
+                    const itemOt20 = draft.ot20Hours || 0;
+                    const itemOt30 = draft.ot30Hours || 0;
+                    const otDecimalEst = (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0);
+                    const otWageEstimated = otDecimalEst * hourlyRate;
+
+                    // Styles for Saturday / Sunday / Holiday matching image perfectly
+                    let rowBgClass = 'bg-white';
+                    let dayTextClass = 'text-slate-700 font-medium';
+                    
+                    if (isPubHoliday) {
+                      rowBgClass = 'bg-[#FFFEA3] print:bg-[#FFFEA3]'; // Bright Gold Canary Yellow
+                      dayTextClass = 'text-amber-800 font-extrabold';
+                    } else if (isSaturday) {
+                      rowBgClass = 'bg-[#ECECEC]/70 print:bg-[#ECECEC]/60'; // Gray
+                      dayTextClass = 'text-purple-700 font-bold';
+                    } else if (isSunday) {
+                      rowBgClass = 'bg-[#ECECEC]/70 print:bg-[#ECECEC]/60'; // Gray
+                      dayTextClass = 'text-red-600 font-bold';
+                    }
+
+                    // Checks Leave style
+                    const defaultRemark = optHoliday ? optHoliday.holidayName : '';
+                    const finalRemark = supp.remarkOverride || draft.remark || defaultRemark;
+                    const labelLower = finalRemark.toLowerCase();
+                    const isLeaveDay = labelLower.includes('leave') || labelLower.includes('ลา');
+                    if (isLeaveDay) {
+                      rowBgClass = 'bg-[#FEEDD1]'; // Sand / Soft peach
+                    }
+
+                    // Total work hours
+                    const workHoursSum = (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
+
+                    return (
+                      <tr 
+                        key={dStr} 
+                        className={`divide-x divide-slate-200 text-center text-[11px] h-9 hover:bg-slate-50/50 print:hover:none ${rowBgClass}`}
+                      >
+                        {/* Day of Week */}
+                        <td className={`py-1 px-1.5 text-left truncate font-sans ${dayTextClass}`}>
+                          {dayOfWeekStr}
+                        </td>
+
+                        {/* Date Number */}
+                        <td className="py-1 px-0.5 font-bold font-mono">
+                          {dayNum}
+                        </td>
+
+                        {/* Start Input */}
+                        <td className="py-1 px-0.5">
+                          <input
+                            type="text"
+                            placeholder="——"
+                            value={draft.timeIn || ''}
+                            onChange={(e) => handleDraftChange(dStr, 'timeIn', e.target.value)}
+                            className="w-full text-center p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono text-[11.5px] font-bold text-slate-800 print:border-b-0 print:p-0"
+                          />
+                        </td>
+
+                        {/* End Input */}
+                        <td className="py-1 px-0.5">
+                          <input
+                            type="text"
+                            placeholder="——"
+                            value={draft.timeOut || ''}
+                            onChange={(e) => handleDraftChange(dStr, 'timeOut', e.target.value)}
+                            className="w-full text-center p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono text-[11.5px] font-bold text-slate-800 print:border-b-0 print:p-0"
+                          />
+                        </td>
+
+                        {/* Calculated Hours Column */}
+                        <td className="py-1 px-0.5 font-mono font-bold text-sky-700 bg-slate-50/20 text-[11.5px]">
+                          {draft.timeIn && draft.timeOut ? (
+                            <span>{workHoursSum.toFixed(0)}</span>
+                          ) : (
+                            <div className="flex items-center justify-center group">
+                              <span className="text-slate-300 group-hover:hidden">—</span>
+                              <button
+                                type="button"
+                                onClick={() => handlePresetStandardShift(dStr)}
+                                title="คีย์สลิปด่วน 8:00 - 17:00"
+                                className="hidden group-hover:inline-flex bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 font-bold px-1 rounded-sm text-[8px] cursor-pointer print:hidden"
+                              >
+                                <Plus className="w-2 h-2 inline" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* 1.0 Overtime Hours */}
+                        <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-505">
+                          {draft.timeIn && draft.timeOut && itemOt20 > 0 ? (
+                            <span>{itemOt20.toFixed(0)}</span>
+                          ) : (
+                            <span className="text-slate-300 font-normal">—</span>
+                          )}
+                        </td>
+
+                        {/* 1.5 Overtime Hours (Standard workday list) */}
+                        <td className="py-1 px-0.5 font-mono text-center font-bold text-amber-700">
+                          {draft.timeIn && draft.timeOut && itemOt15 > 0 ? (
+                            <span>{itemOt15.toFixed(1)}</span>
+                          ) : (
+                            <span className="text-slate-300 font-normal">—</span>
+                          )}
+                        </td>
+
+                        {/* 3.0 Overtime Hours */}
+                        <td className="py-1 px-0.5 font-mono text-center font-bold text-red-650">
+                          {draft.timeIn && draft.timeOut && itemOt30 > 0 ? (
+                            <span>{itemOt30.toFixed(1)}</span>
+                          ) : (
+                            <span className="text-slate-300 font-normal">—</span>
+                          )}
+                        </td>
+
+                        {/* Calculated Value Pay */}
+                        <td className="py-1 px-0.5 font-mono text-right font-bold text-slate-700 bg-slate-50/20 pr-1">
+                          {otWageEstimated > 0 ? (
+                            <span>{otWageEstimated.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+                          ) : (
+                            <span className="text-slate-300 font-normal pr-1">—</span>
+                          )}
+                        </td>
+
+                        {/* Perdiem Allowances Input */}
+                        <td className="py-0.5 px-0.5">
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={supp.perdiem || ''}
+                            onChange={(e) => handleSupplementChange(dStr, 'perdiem', parseFloat(e.target.value) || 0)}
+                            className="w-full text-right py-1 px-1 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-slate-800 text-[11px] print:border-none print:p-0"
+                          />
+                        </td>
+
+                        {/* Advance Payments Input */}
+                        <td className="py-0.5 px-0.5">
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={supp.advance || ''}
+                            onChange={(e) => handleSupplementChange(dStr, 'advance', parseFloat(e.target.value) || 0)}
+                            className="w-full text-right py-1 px-1 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-slate-800 text-[11px] print:border-none print:p-0"
+                          />
+                        </td>
+
+                        {/* Job Bonus Input */}
+                        <td className="py-0.5 px-0.5">
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={supp.jobBonus || ''}
+                            onChange={(e) => handleSupplementChange(dStr, 'jobBonus', parseFloat(e.target.value) || 0)}
+                            className="w-full text-right py-1 px-1 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-slate-800 text-[11px] print:border-none print:p-0"
+                          />
+                        </td>
+
+                        {/* Remarks Input */}
+                        <td className="py-0.5 px-1 text-left">
+                          <input
+                            type="text"
+                            placeholder="——"
+                            value={finalRemark}
+                            onChange={(e) => handleSupplementChange(dStr, 'remarkOverride', e.target.value)}
+                            className="w-full text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-305 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-600 text-[10px] italic truncate print:border-none print:p-0"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+
+                {/* SPREADSHEET FOOTER ROW TOTALS */}
+                <tfoot className="bg-slate-100 text-[10.5px] font-bold border-t border-slate-400 font-mono divide-y divide-slate-400 text-slate-900">
+                  <tr className="divide-x divide-slate-400">
+                    <td colSpan={4} className="py-2.5 px-4 text-right uppercase tracking-wider text-[9px] text-slate-550">Row Totals:</td>
+                    
+                    {/* Sum of standard normal/work hours */}
+                    <td className="py-2.5 px-1 text-center font-mono font-bold bg-slate-50 text-sky-800 text-[11.5px]">
+                      {computedSheetStats.hoursWorked}
+                    </td>
+
+                    <td className="py-2.5 px-1 text-center font-mono">
+                      {renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot20Hours || 0), 0) || '—'}
+                    </td>
+                    <td className="py-2.5 px-1 text-center font-mono text-amber-800">
+                      {renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot15Hours || 0), 0) || '—'}
+                    </td>
+                    <td className="py-2.5 px-1 text-center font-mono text-red-750">
+                      {renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot30Hours || 0), 0) || '—'}
+                    </td>
+
+                    {/* Grand Value sum */}
+                    <td className="py-2.5 px-1 text-right font-mono pr-1 text-[11.5px] text-slate-900 bg-slate-50">
+                      {computedSheetStats.otValueTotal > 0 ? (
+                        <span>{computedSheetStats.otValueTotal.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </td>
+
+                    {/* Total Perdiem column sum */}
+                    <td className="py-2.5 px-1 text-right font-mono text-[11px] pr-1">
+                      {renderedDates.reduce((acc, dStr) => {
+                        const key = `${employeeCodeInput}_${dStr}`;
+                        return acc + (supplements[key]?.perdiem || 0);
+                      }, 0).toLocaleString()}
+                    </td>
+
+                    {/* Total Advance column sum */}
+                    <td className="py-2.5 px-1 text-right font-mono text-[11px] pr-1">
+                      {renderedDates.reduce((acc, dStr) => {
+                        const key = `${employeeCodeInput}_${dStr}`;
+                        return acc + (supplements[key]?.advance || 0);
+                      }, 0).toLocaleString()}
+                    </td>
+
+                    {/* Total Bonus column sum */}
+                    <td className="py-2.5 px-1 text-right font-mono text-[11px] pr-1">
+                      {renderedDates.reduce((acc, dStr) => {
+                        const key = `${employeeCodeInput}_${dStr}`;
+                        return acc + (supplements[key]?.jobBonus || 0);
+                      }, 0).toLocaleString()}
+                    </td>
+
+                    {/* Blank under Remark */}
+                    <td className="py-2.5 px-1"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {/* ======================================================== */}
+            {/* UNDER-SHEET STATS SUMMARY PANEL (MATCHES THE IMAGE EXACTLY) */}
+            {/* ======================================================== */}
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3 p-4 bg-slate-50 border border-slate-300 rounded text-xs text-slate-800 mb-6 font-medium text-left">
+              <div className="space-y-2.5">
+                <div className="flex justify-between border-b border-slate-250 pb-1">
+                  <span className="text-slate-500 uppercase font-bold text-[9.5px]">Day per Month (จำนวนวันในประเมิน) :</span>
+                  <strong className="text-slate-900 font-mono text-right border-b border-slate-800 px-3 min-w-16 block">
+                    {computedSheetStats.daysInPeriod.toFixed(1)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between border-b border-slate-250 pb-1">
+                  <span className="text-slate-500 uppercase font-bold text-[9.5px]">No. of Day worked (วันเข้าทำงานจริง) :</span>
+                  <strong className="text-slate-900 font-mono text-right border-b border-slate-800 px-3 min-w-16 block">
+                    {computedSheetStats.daysWorked.toFixed(1)}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between border-b border-slate-250 pb-1">
+                  <span className="text-slate-500 uppercase font-bold text-[9.5px]">Total of hours worked (ชั่วโมงสะสมรวม) :</span>
+                  <strong className="text-slate-900 font-mono text-right border-b border-slate-800 px-3 min-w-16 block">
+                    {computedSheetStats.hoursWorked.toFixed(1)}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                <div className="flex justify-between border-b border-slate-250 pb-1">
+                  <span className="text-slate-500 uppercase font-bold text-[9.5px]">No. of days on duty (วันอยู่ในหน้าที่) :</span>
+                  <strong className="text-slate-900 font-mono text-right border-b border-slate-800 px-3 min-w-16 block text-slate-500">
+                    {computedSheetStats.daysOnDuty}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between border-b border-slate-250 pb-1">
+                  <span className="text-slate-500 uppercase font-bold text-[9.5px]">Total of Hours on duty (ชั่วโมงอยู่เวรกะ) :</span>
+                  <strong className="text-slate-900 font-mono text-right border-b border-slate-800 px-3 min-w-16 block text-slate-500">
+                    {computedSheetStats.hoursOnDuty}
+                  </strong>
+                </div>
+
+                <div className="flex justify-between border-b border-slate-250 pb-1">
+                  <span className="text-[#B45309] dark:text-amber-700 uppercase font-bold text-[9.5px]">Total Day off / Take Leave (ลารวม/วันหยุดสะสม) :</span>
+                  <strong className="text-[#B45309] font-mono text-right border-b border-amber-800 px-3 min-w-16 block">
+                    {computedSheetStats.totalDayOffOrLeaves.toFixed(1)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* ======================================================== */}
+            {/* AUTHENTIC SIGNATURES BLOCK */}
+            {/* ======================================================== */}
+            <div className="grid grid-cols-4 gap-4 pt-4 text-center text-xs text-slate-800 font-medium">
+              
+              {/* Box 1: Issued By */}
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Issued by :</span>
+                <div className="flex flex-col items-center">
+                  <span className="font-serif italic text-slate-650 mb-0.5" style={{ fontFamily: 'Dancing Script, cursive' }}>Ananta S.</span>
+                  <input
+                    type="text"
+                    value={issuedByInput}
+                    onChange={(e) => setIssuedByInput(e.target.value)}
+                    className="border-b border-slate-300 bg-transparent text-center text-slate-900 font-bold focus:outline-hidden font-sans text-[11px] w-full max-w-[120px]"
+                  />
+                  <div className="text-[8px] text-slate-400 mt-1 uppercase">Date: {endDate.split('-').reverse().join('/')}</div>
+                </div>
+              </div>
+
+              {/* Box 2: Checked By */}
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Check by :</span>
+                <div className="flex flex-col items-center">
+                  <span className="font-serif italic text-slate-650 mb-0.5">Ananta S.</span>
+                  <input
+                    type="text"
+                    value={checkedByInput}
+                    onChange={(e) => setCheckedByInput(e.target.value)}
+                    className="border-b border-slate-300 bg-transparent text-center text-slate-900 font-bold focus:outline-hidden font-sans text-[11px] w-full max-w-[120px]"
+                  />
+                  <div className="text-[8px] text-slate-400 mt-1 uppercase">Date: {endDate.split('-').reverse().join('/')}</div>
+                </div>
+              </div>
+
+              {/* Box 3: Approval */}
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <div className="flex items-center justify-center gap-1">
+                  <span className="text-[10px] text-emerald-600 uppercase font-extrabold tracking-wider block">Approval :</span>
+                  <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.2 rounded-sm border border-emerald-200">Corporate</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="font-serif italic text-emerald-600 font-black mb-0.5">Apiyut N.</span>
+                  <input
+                    type="text"
+                    value={approvedByInput}
+                    onChange={(e) => setApprovedByInput(e.target.value)}
+                    className="border-b border-slate-300 bg-transparent text-center text-emerald-700 font-extrabold focus:outline-hidden font-sans text-[11px] w-full max-w-[120px]"
+                  />
+                  <div className="text-[8px] text-slate-400 mt-1 uppercase">Date: {endDate.split('-').reverse().join('/')}</div>
+                </div>
+              </div>
+
+              {/* Box 4: Employee */}
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Employee Signature:</span>
+                <div className="flex flex-col items-center">
+                  <span className="text-slate-400 select-none pb-1 font-mono text-[9px] block mb-1">Underline Signature</span>
+                  <div className="border-b border-slate-300 w-full max-w-[125px] h-0"></div>
+                  <div className="text-[9.5px] font-bold text-slate-700 mt-1.5 truncate max-w-[130px]" title={selectedEmpName}>
+                    : {selectedEmpName}
+                  </div>
+                  <div className="text-[8px] text-slate-400 uppercase mt-0.5">Date: __/__/____</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom sheet printing footer line */}
+            <div className="mt-6 pt-2 border-t border-slate-250 text-right text-[8px] text-slate-400 font-mono uppercase tracking-widest hidden print:block">
+              : {selectedEmpName} • CONFIDENTIAL TIMESHEET LOG REPORT
+            </div>
+
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
