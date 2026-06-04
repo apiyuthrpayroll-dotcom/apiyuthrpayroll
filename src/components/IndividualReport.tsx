@@ -1377,7 +1377,7 @@ COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันท�
                         {/* Calculated Hours Column */}
                         <td className="py-1 px-0.5 font-mono font-bold text-sky-700 bg-slate-50/20 text-[11.5px]">
                           {draft.timeIn && draft.timeOut ? (
-                            <span>{workHoursSum.toFixed(0)}</span>
+                            <span>{workHoursSum.toFixed(1)}</span>
                           ) : (
                             <div className="flex items-center justify-center group">
                               <span className="text-slate-300 group-hover:hidden">—</span>
@@ -1396,7 +1396,7 @@ COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันท�
                         {/* 1.0 Overtime Hours */}
                         <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-505">
                           {draft.timeIn && draft.timeOut && itemOt20 > 0 ? (
-                            <span>{itemOt20.toFixed(0)}</span>
+                            <span>{itemOt20.toFixed(1)}</span>
                           ) : (
                             <span className="text-slate-300 font-normal">—</span>
                           )}
@@ -1484,17 +1484,26 @@ COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันท�
                     
                     {/* Sum of standard normal/work hours */}
                     <td className="py-2.5 px-1 text-center font-mono font-bold bg-slate-50 text-sky-800 text-[11.5px]">
-                      {computedSheetStats.hoursWorked}
+                      {computedSheetStats.hoursWorked.toFixed(1)}
                     </td>
 
                     <td className="py-2.5 px-1 text-center font-mono">
-                      {renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot20Hours || 0), 0) || '—'}
+                      {(() => {
+                        const sum = renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot20Hours || 0), 0);
+                        return sum > 0 ? sum.toFixed(1) : '—';
+                      })()}
                     </td>
                     <td className="py-2.5 px-1 text-center font-mono text-amber-800">
-                      {renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot15Hours || 0), 0) || '—'}
+                      {(() => {
+                        const sum = renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot15Hours || 0), 0);
+                        return sum > 0 ? sum.toFixed(1) : '—';
+                      })()}
                     </td>
                     <td className="py-2.5 px-1 text-center font-mono text-red-750">
-                      {renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot30Hours || 0), 0) || '—'}
+                      {(() => {
+                        const sum = renderedDates.reduce((acc, dStr) => acc + (draftEntries[dStr]?.ot30Hours || 0), 0);
+                        return sum > 0 ? sum.toFixed(1) : '—';
+                      })()}
                     </td>
 
                     {/* Grand Value sum */}

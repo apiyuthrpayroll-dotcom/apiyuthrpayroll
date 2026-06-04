@@ -173,8 +173,9 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       }
 
       // Thai Withholding Tax: typically 3% for general contract daily wage, or scaled for staff
-      // Estimated default: 3% of OT and daily pay, or 1.5% for general office
-      const taxRate = emp.workScheduleType === 'staff' ? 0.015 : 0.03;
+      // - Staff/Monthly: 1.5%
+      // - Daily / Other (ทุกคนรายวัน): 0% (cancelled-no withholding tax deduction)
+      const taxRate = emp.workScheduleType === 'staff' ? 0.015 : 0;
       const calculatedTax = Math.round(grossIncome * taxRate);
 
       // Student Loan (กยศ)
