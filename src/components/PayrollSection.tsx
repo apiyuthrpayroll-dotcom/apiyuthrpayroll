@@ -21,8 +21,58 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
   const [searchQuery, setSearchQuery] = useState('');
 
   // Editable other components per employee to prevent rigid states
-  const [allowances, setAllowances] = useState<Record<string, number>>({});
-  const [deductions, setDeductions] = useState<Record<string, number>>({});
+  const [allowances, setAllowances] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_allowances');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [deductions, setDeductions] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_deductions');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [customTaxes, setCustomTaxes] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_custom_taxes');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [customStudentLoans, setCustomStudentLoans] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_custom_student_loans');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Persist edits to localStorage for seamless UX
+  React.useEffect(() => {
+    localStorage.setItem('payroll_allowances', JSON.stringify(allowances));
+  }, [allowances]);
+
+  React.useEffect(() => {
+    localStorage.setItem('payroll_deductions', JSON.stringify(deductions));
+  }, [deductions]);
+
+  React.useEffect(() => {
+    localStorage.setItem('payroll_custom_taxes', JSON.stringify(customTaxes));
+  }, [customTaxes]);
+
+  React.useEffect(() => {
+    localStorage.setItem('payroll_custom_student_loans', JSON.stringify(customStudentLoans));
+  }, [customStudentLoans]);
   
   // Selected employee for the official Payslip Modal view
   const [selectedSlipEmpId, setSelectedSlipEmpId] = useState<string | null>(null);
@@ -173,13 +223,13 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       }
 
       // Thai Withholding Tax: typically 3% for general contract daily wage, or scaled for staff
-      // - Staff/Monthly: 1.5%
-      // - Daily / Other (ทุกคนรายวัน): 0% (cancelled-no withholding tax deduction)
-      const taxRate = emp.workScheduleType === 'staff' ? 0.015 : 0;
-      const calculatedTax = Math.round(grossIncome * taxRate);
+      // - User requested all tax to be manual entry, no autocalculation is performed (default to 0 if not entered manually)
+      const defaultTax = 0;
+      const calculatedTax = customTaxes[emp.id] !== undefined ? customTaxes[emp.id] : defaultTax;
 
-      // Student Loan (กยศ)
-      const studentLoanDeduct = emp.studentLoan || 0;
+      // Student Loan (กยศ) override or default
+      const defaultStudentLoan = emp.studentLoan || 0;
+      const studentLoanDeduct = customStudentLoans[emp.id] !== undefined ? customStudentLoans[emp.id] : defaultStudentLoan;
 
       const totalDeductionVal = ssoDeduction + calculatedTax + studentLoanDeduct + otherDeduction;
       const netPayment = grossIncome - totalDeductionVal;
@@ -213,7 +263,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         bankAccount: emp.bankAccount || 'xxx-xxx-xxxx'
       };
     });
-  }, [employees, periodEntries, allowances, deductions, settings]);
+  }, [employees, periodEntries, allowances, deductions, customTaxes, customStudentLoans, settings]);
 
   // Overall sums to show in top summary rows
   const totals = useMemo(() => {
@@ -461,7 +511,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
               className="py-2 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-sm text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
-              {isSaving ? 'กำลังบันทึก...' : 'ซิงค์ประวัติเข้า Supabase'}
+              {isSaving ? 'กำลังบันทึกข้อมูล...' : 'บันทึกข้อมูลและส่งเข้า Supabase'}
             </button>
           </div>
         </div>
@@ -680,9 +730,24 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       />
                     </td>
 
-                    {/* Deductions: tax */}
-                    <td className="py-2 px-3 text-right font-mono text-red-500 dark:text-red-400">
-                      {p.tax.toLocaleString()}
+                    {/* Deductions: tax - Editable Input */}
+                    <td className="py-2 px-3 text-center">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={customTaxes[p.id] !== undefined ? customTaxes[p.id] : p.tax}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            const updated = { ...customTaxes };
+                            delete updated[p.id];
+                            setCustomTaxes(updated);
+                          } else {
+                            setCustomTaxes({ ...customTaxes, [p.id]: parseFloat(raw) || 0 });
+                          }
+                        }}
+                        className={`w-20 text-[11px] px-1.5 py-1 text-right bg-transparent border rounded-sm focus:outline-hidden ${isDark ? 'border-white/10 text-red-400 focus:border-red-500 font-mono' : 'border-slate-300 text-red-600 font-bold focus:border-red-500 font-mono'}`}
+                      />
                     </td>
 
                     {/* Deductions: SSO */}
@@ -690,11 +755,24 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       {p.sso}
                     </td>
 
-                    {/* Student Loan */}
-                    <td className="py-2 px-3 text-right font-mono text-purple-600 dark:text-purple-305">
-                      {p.studentLoan > 0 ? (
-                        <span title="หัก กยศ. ตามไฟล์ประวัติ">{p.studentLoan}</span>
-                      ) : '—'}
+                    {/* Student Loan - Editable Input */}
+                    <td className="py-2 px-3 text-center">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={customStudentLoans[p.id] !== undefined ? customStudentLoans[p.id] : p.studentLoan}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            const updated = { ...customStudentLoans };
+                            delete updated[p.id];
+                            setCustomStudentLoans(updated);
+                          } else {
+                            setCustomStudentLoans({ ...customStudentLoans, [p.id]: parseFloat(raw) || 0 });
+                          }
+                        }}
+                        className={`w-20 text-[11px] px-1.5 py-1 text-right bg-transparent border rounded-sm focus:outline-hidden ${isDark ? 'border-white/10 text-purple-400 focus:border-purple-500 font-mono' : 'border-slate-300 text-purple-750 font-bold focus:border-purple-500 font-mono'}`}
+                      />
                     </td>
 
 

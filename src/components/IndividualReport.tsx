@@ -88,6 +88,7 @@ export default function IndividualReport({
 
   // Draft Timesheet entries edit matrix to support typing work times without latency
   const [draftEntries, setDraftEntries] = useState<Record<string, Partial<TimesheetEntry>>>({});
+  const [isBatchPrinting, setIsBatchPrinting] = useState<boolean>(false);
 
   // Auto select first employee if empty
   useEffect(() => {
@@ -607,6 +608,108 @@ export default function IndividualReport({
     };
   }, [renderedDates, draftEntries, supplements, employeeCodeInput, hourlyRate]);
 
+  // Helper to resolve timesheet entries for any employee
+  const getEmployeeEntryForDate = (empName: string, dStr: string) => {
+    if (empName.toLowerCase().trim() === selectedEmpName.toLowerCase().trim()) {
+      const draft = draftEntries[dStr];
+      if (draft) return draft;
+    }
+    
+    const existing = entries.find(e => {
+      return e.employeeName.toLowerCase().trim() === empName.toLowerCase().trim() && e.date === dStr;
+    });
+    
+    if (existing) return existing;
+    
+    return {
+      id: `temp-${empName}-${dStr}`,
+      employeeName: empName,
+      date: dStr,
+      project: projectInput || 'workshop',
+      timeIn: '',
+      timeOut: '',
+      lunchDeduct: 1,
+      lunchOT: 0,
+      flatRate: false,
+      normalHours: 0,
+      ot15Hours: 0,
+      ot20Hours: 0,
+      ot30Hours: 0,
+      remark: '',
+      status: 'Pending'
+    };
+  };
+
+  // Helper to resolve hourly rate for any employee
+  const getEmployeeHourlyRate = (emp: Employee) => {
+    const workHours = settings.defaultWorkHours || 8;
+    if (emp.workScheduleType === 'staff' || emp.workScheduleType === 'monthly_worker') {
+      const salary = emp.staffSalary || emp.officeSalary || 0;
+      return Number((salary / 30 / workHours).toFixed(2));
+    } else {
+      const dayWage = emp.workshopRate || settings.defaultDailyWage || 700;
+      return Number((dayWage / workHours).toFixed(2));
+    }
+  };
+
+  // Helper to resolve monthly timesheet stats for any employee
+  const getEmployeeSheetStats = (emp: Employee, empHourlyRate: number) => {
+    let daysInPeriodVal = renderedDates.length;
+    let daysWorkedVal = 0;
+    let hoursWorkedVal = 0;
+    let leavesCount = 0;
+
+    let ot15Sum = 0;
+    let ot20Sum = 0;
+    let ot30Sum = 0;
+
+    renderedDates.forEach(dStr => {
+      const draft = getEmployeeEntryForDate(emp.employeeName, dStr);
+      const key = `${emp.id}_${dStr}`;
+      const supp = supplements[key];
+
+      const hasWork = draft && draft.timeIn && draft.timeOut;
+      const isSatOrSun = new Date(dStr).getDay() === 0 || new Date(dStr).getDay() === 6;
+
+      if (hasWork) {
+        daysWorkedVal++;
+        hoursWorkedVal += (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
+        
+        ot15Sum += draft.ot15Hours || 0;
+        ot20Sum += draft.ot20Hours || 0;
+        ot30Sum += draft.ot30Hours || 0;
+      }
+
+      // Check leave
+      const lowerRemark = ((draft?.remark || '') + ' ' + (supp?.remarkOverride || '')).toLowerCase();
+      if (lowerRemark.includes('leave') || lowerRemark.includes('ลา') || lowerRemark.includes('annual')) {
+        leavesCount++;
+      } else if (isSatOrSun && !hasWork) {
+        leavesCount++;
+      }
+    });
+
+    const otValueTotal = (ot15Sum * 1.5 + ot20Sum * 2.0 + ot30Sum * 3.0) * empHourlyRate;
+
+    return {
+      daysInPeriod: daysInPeriodVal,
+      daysWorked: daysWorkedVal,
+      hoursWorked: Number(hoursWorkedVal.toFixed(2)),
+      daysOnDuty: '—',
+      hoursOnDuty: '—',
+      totalDayOffOrLeaves: leavesCount,
+      otValueTotal: Number(otValueTotal.toFixed(2))
+    };
+  };
+
+  const startBatchPrint = () => {
+    setIsBatchPrinting(true);
+    setTimeout(() => {
+      window.print();
+      setIsBatchPrinting(false);
+    }, 250);
+  };
+
   // Export Specific Employee Month details to CSV
   const exportEmpCSV = () => {
     if (!activeEmployee) return;
@@ -1015,7 +1118,16 @@ export default function IndividualReport({
                 className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                พิมพ์ตาราง PDF (Print)
+                พิมพ์ของคนที่เลือก (Print Selected)
+              </button>
+
+              <button
+                type="button"
+                onClick={startBatchPrint}
+                className="flex items-center gap-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white font-extrabold text-xs py-2 px-4 rounded-sm transition-all border border-purple-500/20 cursor-pointer shadow-md"
+              >
+                <Printer className="w-4 h-4" />
+                พิมพ์ของทุกคน (Batch print A4ทุกคน)
               </button>
 
               <button
@@ -1672,6 +1784,453 @@ COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันท�
           </div>
         </div>
       )}
+
+      {/* 4. HIGH FIDELITY MULTI-EMPLOYEE BATCH PRINT / SINGLE VIEW PORTRAIT OVERLAY FOR A4 PRINTING */}
+      <div id="print-backdrop-container" className="hidden print:block bg-white text-black p-0 m-0 w-full">
+        {/* Style tag to enforce perfect A4 Vertical/Portrait format rules when printing */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          @media print {
+            @page {
+              size: A4 portrait;
+              margin: 8mm 8mm 8mm 8mm !important;
+            }
+            body {
+              background: white !important;
+              color: text-black !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            #root > *:not(#print-backdrop-container),
+            header,
+            footer,
+            nav,
+            aside,
+            button,
+            .print-hidden,
+            .no-print {
+              display: none !important;
+              visibility: hidden !important;
+            }
+            #print-backdrop-container,
+            #print-backdrop-container * {
+              visibility: visible !important;
+            }
+            #print-backdrop-container {
+              display: block !important;
+              position: absolute !important;
+              left: 0 !important;
+              top: 0 !important;
+              width: 100% !important;
+              background: white !important;
+              color: black !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            @keyframes fade-in {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            .print-page-break {
+              page-break-after: always !important;
+              break-after: page !important;
+              display: block !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              border: none !important;
+              background: white !important;
+              color: black !important;
+            }
+            /* Styling tables to stay neat and fit on portrait */
+            table {
+              border-collapse: collapse !important;
+              width: 100% !important;
+              table-layout: fixed !important;
+            }
+            th, td {
+              border-color: #334155 !important; /* slate-700 */
+              font-size: 8px !important;
+              padding: 1.5px 0.5px !important;
+              color: #000000 !important;
+              border-style: solid !important;
+              border-width: 1px !important;
+            }
+            input {
+              border: none !important;
+              outline: none !important;
+              background: transparent !important;
+              box-shadow: none !important;
+              width: 100% !important;
+              text-align: center !important;
+              font-weight: bold !important;
+              color: #000000 !important;
+            }
+          }
+        ` }} />
+
+        {/* If batch printing, run a loop for ALL employees. 
+            If not batch printing, just render the SINGLE SELECTED employee's timesheet so they can print his sheet individually! */}
+        {(isBatchPrinting ? employees : [activeEmployee]).filter(Boolean).map((emp, empIdx, arr) => {
+          if (!emp) return null;
+          
+          const empHourlyRate = getEmployeeHourlyRate(emp);
+          const stats = getEmployeeSheetStats(emp, empHourlyRate);
+          const empPosition = emp.position || 'พนักงาน';
+          const empId = emp.id || '';
+          
+          return (
+            <div 
+              key={emp.id} 
+              className={`bg-white text-slate-900 font-sans p-2 w-full max-w-[760px] mx-auto ${empIdx < arr.length - 1 ? 'print-page-break' : ''}`}
+              style={{ minHeight: '277mm' /* standard A4 portrait height minus margin */ }}
+            >
+              {/* SHEET HEADER LAYOUT */}
+              <div className="flex justify-between items-start border-b-2 border-slate-800 pb-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 bg-black text-white font-extrabold flex flex-col justify-center items-center rounded-xs shrink-0 tracking-tighter" style={{ fontFamily: 'monospace' }}>
+                    <div className="text-[11px] leading-3 font-black">I K M</div>
+                    <div className="text-[5.5px] border-t border-white/50 px-0.5 mt-0.5">TESTING</div>
+                  </div>
+                  <div className="text-left">
+                    <h1 className="text-[11px] font-black tracking-wider uppercase font-sans text-black">IKM TESTING (THAILAND) CO., LTD.</h1>
+                    <p className="text-[6.5px] text-slate-500 leading-tight font-bold">OFFICIAL REPRESENTATIVE IN KINGDOM OF THAILAND</p>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <div className="border border-dashed border-slate-400 px-3 py-0.5 text-center rounded bg-slate-50 font-bold max-w-40">
+                    <span className="text-[7.5px] uppercase tracking-widest text-slate-500 block font-mono">Month Indicator</span>
+                    <span className="text-[11px] text-slate-900 font-extrabold font-serif uppercase tracking-wider">{activeMonthLabel}-{selectedYear}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Centered Document Title */}
+              <div className="text-center mb-3">
+                <h2 className="text-sm font-black tracking-widest uppercase border-b border-slate-900 inline-block px-5 pb-0.5" style={{ letterSpacing: '0.25em' }}>
+                  TIME SHEET
+                </h2>
+              </div>
+
+              {/* METADATA TWO COLUMN GRID */}
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 mb-3 text-[9px] text-left" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
+                <div className="space-y-1">
+                  <div className="flex items-end gap-1">
+                    <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Name-Surname:</span>
+                    <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1 text-[10px]">
+                      {emp.employeeName}
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Position:</span>
+                    <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1">
+                      {empPosition}
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Location:</span>
+                    <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1">
+                      {locationInput || 'IKM Office'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-end gap-1">
+                    <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Employee Code:</span>
+                    <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1 font-mono">
+                      {empId}
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Date Submitted:</span>
+                    <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1 font-mono">
+                      {endDate.split('-').reverse().join('/')}
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Project / Services:</span>
+                    <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1">
+                      {projectInput || 'workshop'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* SPREADSHEET MATRIX */}
+              <div className="border border-slate-400 overflow-hidden mb-3 rounded-xs">
+                <table className="w-full text-left text-[9px] text-slate-900 table-fixed border-collapse">
+                  <thead className="bg-slate-100 text-slate-700 text-[7.5px] uppercase font-bold text-center border-b border-slate-400 font-mono tracking-tight">
+                    <tr className="border-b border-slate-400 divide-x divide-slate-400">
+                      <th className="py-1 px-1 w-[55px] font-sans" rowSpan={2}>Day</th>
+                      <th className="py-1 px-0.5 w-[22px]" rowSpan={2}>Date</th>
+                      <th className="py-0.5 px-0.5 bg-slate-50" colSpan={3}>Working Time</th>
+                      <th className="py-0.5 px-0.5 bg-slate-50" colSpan={4}>Overtime</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[45px] font-sans" rowSpan={2}>Perdiem</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[40px] font-sans" rowSpan={2}>Advance</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[40px] font-sans" rowSpan={2}>Job Bonus</th>
+                      <th className="py-1 px-1 w-[80px] font-sans" rowSpan={2}>Remark</th>
+                    </tr>
+                    <tr className="divide-x divide-slate-400 text-[7px]">
+                      <th className="py-0.5 px-0.5 w-[30px] font-mono">Start</th>
+                      <th className="py-0.5 px-0.5 w-[30px] font-mono">End</th>
+                      <th className="py-0.5 px-0.5 w-[25px] text-sky-700">Total</th>
+                      <th className="py-0.5 px-0.5 w-[22px] text-emerald-700">1.0</th>
+                      <th className="py-0.5 px-0.5 w-[22px] text-amber-700">1.5</th>
+                      <th className="py-0.5 px-0.5 w-[22px] text-red-700">3.0</th>
+                      <th className="py-0.5 px-0.5 bg-slate-50 w-[40px]">Value</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-300">
+                    {renderedDates.map((dStr) => {
+                      const draft = getEmployeeEntryForDate(emp.employeeName, dStr);
+                      const key = `${emp.id}_${dStr}`;
+                      const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+
+                      const dateObj = new Date(dStr);
+                      const dayNum = dateObj.getDate();
+                      const dayOfWeekStr = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+                      
+                      const dayVal = dateObj.getDay();
+                      const isSunday = dayVal === 0;
+                      const isSaturday = dayVal === 6;
+
+                      const optHoliday = holidays.find(h => h.holidayDate === dStr);
+                      const isPubHoliday = !!optHoliday;
+
+                      const itemOt15 = draft.ot15Hours || 0;
+                      const itemOt20 = draft.ot20Hours || 0;
+                      const itemOt30 = draft.ot30Hours || 0;
+                      const otDecimalEst = (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0);
+                      const otWageEstimated = otDecimalEst * empHourlyRate;
+
+                      let rowBgClass = 'bg-white';
+                      let dayTextClass = 'text-slate-700 font-medium';
+                      
+                      if (isPubHoliday) {
+                        rowBgClass = 'bg-yellow-50';
+                        dayTextClass = 'text-amber-800 font-bold';
+                      } else if (isSaturday) {
+                        rowBgClass = 'bg-slate-50';
+                        dayTextClass = 'text-purple-700 font-medium';
+                      } else if (isSunday) {
+                        rowBgClass = 'bg-slate-50';
+                        dayTextClass = 'text-red-600 font-medium';
+                      }
+
+                      const defaultRemark = optHoliday ? optHoliday.holidayName : '';
+                      const finalRemark = supp.remarkOverride || draft.remark || defaultRemark;
+                      const isLeaveDay = finalRemark.toLowerCase().includes('leave') || finalRemark.toLowerCase().includes('ลา');
+                      if (isLeaveDay) {
+                        rowBgClass = 'bg-orange-50/50';
+                      }
+
+                      const workHoursSum = (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
+
+                      return (
+                        <tr key={dStr} className={`divide-x divide-slate-200 text-center text-[7.5px] h-6 ${rowBgClass}`}>
+                          <td className={`py-0.5 px-0.5 text-left truncate font-sans text-[7.5px] ${dayTextClass}`}>
+                            {dayOfWeekStr}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-bold font-mono text-[7.5px]">
+                            {dayNum}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono text-[7.5px] font-bold">
+                            {draft.timeIn || '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono text-[7.5px] font-bold">
+                            {draft.timeOut || '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono font-bold text-sky-850 bg-slate-50/20 text-[7.5px]">
+                            {draft.timeIn && draft.timeOut ? workHoursSum.toFixed(1) : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono font-bold text-slate-800 text-[7.5px]">
+                            {draft.timeIn && draft.timeOut && itemOt20 > 0 ? itemOt20.toFixed(1) : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono font-medium text-amber-800 text-[7.5px]">
+                            {draft.timeIn && draft.timeOut && itemOt15 > 0 ? itemOt15.toFixed(1) : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono font-medium text-red-650 text-[7.5px]">
+                            {draft.timeIn && draft.timeOut && itemOt30 > 0 ? itemOt30.toFixed(1) : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 font-mono text-right font-bold text-slate-800 pr-0.5">
+                            {otWageEstimated > 0 ? otWageEstimated.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 text-right font-mono font-bold text-[7.5px] pr-0.5">
+                            {supp.perdiem > 0 ? supp.perdiem.toLocaleString() : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 text-right font-mono text-[7.5px] pr-0.5">
+                            {supp.advance > 0 ? supp.advance.toLocaleString() : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.2 text-right font-mono font-bold text-slate-800 text-[7.5px] pr-0.5">
+                            {supp.jobBonus > 0 ? supp.jobBonus.toLocaleString() : '—'}
+                          </td>
+                          <td className="py-0.5 px-0.5 text-left text-[7.5px] truncate italic font-medium text-slate-600">
+                            {finalRemark || '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+
+                  {/* SPREADSHEET FOOTER ROW TOTALS */}
+                  <tfoot className="bg-slate-50 font-mono text-[7.5px] font-bold text-center border-t-2 border-slate-800">
+                    <tr className="divide-x divide-slate-200">
+                      <td colSpan={4} className="py-1 px-1.5 text-right uppercase font-bold text-[7.5px] pr-2">
+                        Actual Total:
+                      </td>
+                      <td className="py-1 px-0.2 text-center font-mono font-black text-sky-800 text-[7.5px] bg-sky-50/40">
+                        {stats.hoursWorked.toFixed(1)}
+                      </td>
+                      <td className="py-1 px-0.2 text-center font-mono font-bold">
+                        {(() => {
+                          const sum = renderedDates.reduce((acc, dStr) => acc + (getEmployeeEntryForDate(emp.employeeName, dStr)?.ot20Hours || 0), 0);
+                          return sum > 0 ? sum.toFixed(1) : '—';
+                        })()}
+                      </td>
+                      <td className="py-1 px-0.2 text-center font-mono text-amber-800">
+                        {(() => {
+                          const sum = renderedDates.reduce((acc, dStr) => acc + (getEmployeeEntryForDate(emp.employeeName, dStr)?.ot15Hours || 0), 0);
+                          return sum > 0 ? sum.toFixed(1) : '—';
+                        })()}
+                      </td>
+                      <td className="py-1 px-0.2 text-center font-mono text-red-750">
+                        {(() => {
+                          const sum = renderedDates.reduce((acc, dStr) => acc + (getEmployeeEntryForDate(emp.employeeName, dStr)?.ot30Hours || 0), 0);
+                          return sum > 0 ? sum.toFixed(1) : '—';
+                        })()}
+                      </td>
+                      <td className="py-1 px-0.2 text-right font-mono font-extrabold pr-0.5 text-[#0F766E] bg-emerald-50/40">
+                        {stats.otValueTotal > 0 ? stats.otValueTotal.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
+                      </td>
+                      <td className="py-1 px-0.2 text-right font-mono font-bold pr-0.5 bg-slate-50/40">
+                        {(() => {
+                          const sum = renderedDates.reduce((acc, dStr) => acc + (supplements[`${emp.id}_${dStr}`]?.perdiem || 0), 0);
+                          return sum > 0 ? sum.toLocaleString() : '—';
+                        })()}
+                      </td>
+                      <td className="py-1 px-0.2 text-right font-mono pr-0.5">
+                        {(() => {
+                          const sum = renderedDates.reduce((acc, dStr) => acc + (supplements[`${emp.id}_${dStr}`]?.advance || 0), 0);
+                          return sum > 0 ? sum.toLocaleString() : '—';
+                        })()}
+                      </td>
+                      <td className="py-1 px-0.2 text-right font-mono font-bold pr-0.5">
+                        {(() => {
+                          const sum = renderedDates.reduce((acc, dStr) => acc + (supplements[`${emp.id}_${dStr}`]?.jobBonus || 0), 0);
+                          return sum > 0 ? sum.toLocaleString() : '—';
+                        })()}
+                      </td>
+                      <td className="py-1 px-0.5 bg-slate-100 italic font-medium text-[7px] text-slate-500 truncate">
+                        IKM SIG
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* UNDER-SHEET STATS SUMMARY PANEL */}
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1 p-1.5 bg-slate-50 border border-slate-300 rounded text-[8.5px] text-slate-800 mb-2 font-medium text-left">
+                <div className="space-y-0.5">
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500 uppercase font-bold text-[7.5px]">Day per Month (จำนวนวันในประเมิน):</span>
+                    <strong className="text-slate-900 font-mono text-right min-w-10 block">
+                      {stats.daysInPeriod.toFixed(1)}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500 uppercase font-bold text-[7.5px]">No. of Day worked (วันเข้าทำงานจริง):</span>
+                    <strong className="text-slate-900 font-mono text-right min-w-10 block">
+                      {stats.daysWorked.toFixed(1)}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500 uppercase font-bold text-[7.5px]">Total of hours worked (ชั่วโมงสะสมรวม):</span>
+                    <strong className="text-slate-900 font-mono text-right min-w-10 block">
+                      {stats.hoursWorked.toFixed(1)}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="space-y-0.5">
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500 uppercase font-bold text-[7.5px]">No. of days on duty (วันอยู่ในหน้าที่):</span>
+                    <strong className="text-slate-400 font-mono text-right min-w-10 block">
+                      —
+                    </strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500 uppercase font-bold text-[7.5px]">Total of Hours on duty (ชั่วโมงอยู่เวรกะ):</span>
+                    <strong className="text-slate-400 font-mono text-right min-w-10 block">
+                      —
+                    </strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-0.5">
+                    <span className="text-slate-500 uppercase font-bold text-[7.5px]">Total Day off / Take Leave (ลารวม/วันหยุดสะสม):</span>
+                    <strong className="text-amber-800 font-mono text-right min-w-10 block">
+                      {stats.totalDayOffOrLeaves.toFixed(1)}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* AUTHENTIC SIGNATURES BLOCK */}
+              <div className="grid grid-cols-4 gap-2 pt-1 text-center text-[8px] text-slate-800 font-medium">
+                <div className="border border-slate-300 p-1 rounded bg-slate-50/50 flex flex-col justify-between h-[75px]">
+                  <span className="text-[7.5px] text-slate-500 uppercase font-bold tracking-wider block">Issued by:</span>
+                  <div className="flex flex-col items-center">
+                    <span className="font-serif italic text-slate-600 text-[8.5px]">{issuedByInput}</span>
+                    <div className="border-b border-slate-300 w-full text-center font-bold text-slate-900 text-[8.5px]">
+                      {issuedByInput}
+                    </div>
+                    <div className="text-[6px] text-slate-400 mt-0.5 uppercase font-mono">Date: {endDate.split('-').reverse().join('/')}</div>
+                  </div>
+                </div>
+
+                <div className="border border-slate-300 p-1 rounded bg-slate-50/50 flex flex-col justify-between h-[75px]">
+                  <span className="text-[7.5px] text-slate-500 uppercase font-bold tracking-wider block">Check by:</span>
+                  <div className="flex flex-col items-center">
+                    <span className="font-serif italic text-slate-600 text-[8.5px]">{checkedByInput}</span>
+                    <div className="border-b border-slate-300 w-full text-center font-bold text-slate-900 text-[8.5px]">
+                      {checkedByInput}
+                    </div>
+                    <div className="text-[6px] text-slate-400 mt-0.5 uppercase font-mono">Date: {endDate.split('-').reverse().join('/')}</div>
+                  </div>
+                </div>
+
+                <div className="border border-slate-300 p-1 rounded bg-slate-50/50 flex flex-col justify-between h-[75px]">
+                  <div className="flex items-center justify-center gap-0.5">
+                    <span className="text-[7.5px] text-emerald-600 uppercase font-extrabold tracking-wider block">Approval:</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="font-serif italic text-emerald-600 font-black text-[8.5px]">{approvedByInput}</span>
+                    <div className="border-b border-slate-300 w-full text-center font-extrabold text-emerald-700 text-[8.5px]">
+                      {approvedByInput}
+                    </div>
+                    <div className="text-[6px] text-slate-400 mt-0.5 uppercase font-mono">Date: {endDate.split('-').reverse().join('/')}</div>
+                  </div>
+                </div>
+
+                <div className="border border-slate-300 p-1 rounded bg-slate-50/50 flex flex-col justify-between h-[75px]">
+                  <span className="text-[7.5px] text-slate-500 uppercase font-bold tracking-wider block">Employee Signature:</span>
+                  <div className="flex flex-col items-center">
+                    <div className="border-b border-slate-300 w-full max-w-[75px] h-2"></div>
+                    <div className="text-[8px] font-bold text-slate-700 mt-1 truncate max-w-[85px]" title={emp.employeeName}>
+                      : {emp.employeeName}
+                    </div>
+                    <div className="text-[6px] text-slate-400 uppercase mt-0.5">Date: __/__/____</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Custom sheet printing footer line */}
+              <div className="mt-3 pt-1 border-t border-slate-200 text-right text-[6.5px] text-slate-400 font-mono uppercase tracking-widest block">
+                : {emp.employeeName} • CONFIDENTIAL TIMESHEET LOG REPORT
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
     </div>
   );
