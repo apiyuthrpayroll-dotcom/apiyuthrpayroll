@@ -3,6 +3,7 @@ import { Employee, Holiday, TimesheetEntry, SystemSettings } from './types';
 import { initialEmployees } from './data/employees';
 import { initialHolidays } from './data/holidays';
 import { initialTimesheetEntries } from './data/initialTimesheets';
+import { calculateEntryOT } from './utils/calculator';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -76,56 +77,101 @@ export default function App() {
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
 
   // Load from Supabase (or fallback to LocalStorage/pre-seeded)
+  // Load from Supabase (or fallback to LocalStorage/pre-seeded)
   useEffect(() => {
     async function loadDataAndSync() {
       try {
         // 1. Fetch Employees
+        let activeEmployees: Employee[] = [];
         const dbEmps = await dbFetchEmployees();
         if (dbEmps && dbEmps.length > 0) {
-          setEmployees(dbEmps);
-          localStorage.setItem('thai_ot_employees', JSON.stringify(dbEmps));
+          activeEmployees = dbEmps;
         } else {
           const savedEmployees = localStorage.getItem('thai_ot_employees');
           if (savedEmployees) {
-            setEmployees(JSON.parse(savedEmployees));
+            activeEmployees = JSON.parse(savedEmployees);
           } else {
-            setEmployees(initialEmployees);
+            activeEmployees = initialEmployees;
             localStorage.setItem('thai_ot_employees', JSON.stringify(initialEmployees));
             // Opt-in populate Supabase so database starts with values
             initialEmployees.forEach(emp => dbUpsertEmployee(emp));
           }
         }
+        setEmployees(activeEmployees);
+        localStorage.setItem('thai_ot_employees', JSON.stringify(activeEmployees));
 
-        // 2. Fetch Timesheets
+        // 2. Fetch Holidays
+        let activeHolidays: Holiday[] = [];
+        const savedHolidays = localStorage.getItem('thai_ot_holidays');
+        if (savedHolidays) {
+          let parsed = JSON.parse(savedHolidays);
+          parsed = parsed.filter((h: any) => h.holidayDate !== '2026-05-04');
+          activeHolidays = parsed;
+        } else {
+          activeHolidays = initialHolidays;
+        }
+        setHolidays(activeHolidays);
+        localStorage.setItem('thai_ot_holidays', JSON.stringify(activeHolidays));
+
+        // 3. Fetch Timesheets
+        let activeEntries: TimesheetEntry[] = [];
         const dbTimesheets = await dbFetchTimesheets();
         if (dbTimesheets && dbTimesheets.length > 0) {
-          setEntries(dbTimesheets);
-          localStorage.setItem('thai_ot_entries', JSON.stringify(dbTimesheets));
+          activeEntries = dbTimesheets;
         } else {
           const savedEntries = localStorage.getItem('thai_ot_entries');
           if (savedEntries) {
-            setEntries(JSON.parse(savedEntries));
+            activeEntries = JSON.parse(savedEntries);
           } else {
-            setEntries(initialTimesheetEntries);
+            activeEntries = initialTimesheetEntries;
             localStorage.setItem('thai_ot_entries', JSON.stringify(initialTimesheetEntries));
             // Opt-in populate Supabase so database starts with values
             dbBulkInsertTimesheets(initialTimesheetEntries);
           }
         }
 
+        // 4. Force Recalculate 2026-05-04 entries to be normal working days (excluding holiday rule)
+        let updatedEntries = activeEntries.map(entry => {
+          if (entry.date === '2026-05-04') {
+            const matchedEmp = activeEmployees.find(emp => emp.employeeName === entry.employeeName);
+            const isFlat = matchedEmp?.isFlatRate || false;
+            const updatedCalc = calculateEntryOT(
+              entry.date,
+              entry.timeIn,
+              entry.timeOut,
+              entry.lunchDeduct,
+              entry.lunchOT,
+              isFlat,
+              activeHolidays,
+              entry.project,
+              matchedEmp?.workScheduleType,
+              matchedEmp?.position
+            );
+            return {
+              ...entry,
+              normalHours: updatedCalc.normalHours,
+              ot15Hours: updatedCalc.ot15Hours,
+              ot20Hours: updatedCalc.ot20Hours,
+              ot30Hours: updatedCalc.ot30Hours,
+              totalHours: updatedCalc.totalHours
+            };
+          }
+          return entry;
+        });
+
+        setEntries(updatedEntries);
+        localStorage.setItem('thai_ot_entries', JSON.stringify(updatedEntries));
+
+        // Also update Supabase database for changed ones
+        const changed0504Entries = updatedEntries.filter(entry => entry.date === '2026-05-04');
+        if (changed0504Entries.length > 0) {
+          dbBulkInsertTimesheets(changed0504Entries);
+        }
+
         setSupabaseConnected(true);
       } catch (e) {
         setSupabaseConnected(false);
         console.warn('⚠️ Fallback to browser storage as Supabase client is configuring...', e);
-      }
-
-      // 3. Holidays from local
-      const savedHolidays = localStorage.getItem('thai_ot_holidays');
-      if (savedHolidays) {
-        setHolidays(JSON.parse(savedHolidays));
-      } else {
-        setHolidays(initialHolidays);
-        localStorage.setItem('thai_ot_holidays', JSON.stringify(initialHolidays));
       }
     }
     
@@ -206,6 +252,11 @@ export default function App() {
   const handleDeleteHoliday = (id: number) => {
     const matched = holidays.filter(h => h.id !== id);
     updateHolidaysAndSync(matched);
+  };
+
+  const handleUpdateHoliday = (updated: Holiday) => {
+    const list = holidays.map(h => h.id === updated.id ? updated : h);
+    updateHolidaysAndSync(list);
   };
 
   // 3. Timesheet Entries Managers
@@ -587,6 +638,7 @@ export default function App() {
             holidays={holidays}
             onAddHoliday={handleAddHoliday}
             onDeleteHoliday={handleDeleteHoliday}
+            onUpdateHoliday={handleUpdateHoliday}
             isDark={isDark}
           />
         )}

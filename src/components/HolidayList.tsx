@@ -1,17 +1,24 @@
 import React, { useState } from 'react';
 import { Holiday } from '../types';
-import { CalendarPlus, ShieldAlert, Trash2 } from 'lucide-react';
+import { CalendarPlus, ShieldAlert, Trash2, Pencil, Check, X } from 'lucide-react';
 
 interface HolidayListProps {
   holidays: Holiday[];
   onAddHoliday: (h: Holiday) => void;
   onDeleteHoliday: (id: number) => void;
+  onUpdateHoliday: (h: Holiday) => void;
   isDark?: boolean;
 }
 
-export default function HolidayList({ holidays, onAddHoliday, onDeleteHoliday, isDark = true }: HolidayListProps) {
+export default function HolidayList({ holidays, onAddHoliday, onDeleteHoliday, onUpdateHoliday, isDark = true }: HolidayListProps) {
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDate, setNewHolidayDate] = useState('2026-05-01');
+
+  // Edit states
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editType, setEditType] = useState('Public');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,6 +41,36 @@ export default function HolidayList({ holidays, onAddHoliday, onDeleteHoliday, i
 
     onAddHoliday(created);
     setNewHolidayName('');
+  };
+
+  const handleStartEdit = (hol: Holiday) => {
+    setEditingId(hol.id);
+    setEditName(hol.holidayName);
+    setEditDate(hol.holidayDate);
+    setEditType(hol.type);
+  };
+
+  const handleSaveEdit = (id: number) => {
+    if (!editName.trim() || !editDate) {
+      alert('กรุณากรอกวันที่และชื่ออธิบายวันหยุด');
+      return;
+    }
+    // Check if the date is already used by another holiday
+    if (holidays.some(h => h.holidayDate === editDate && h.id !== id)) {
+      alert('วันนี้ได้รับการบันทึกเป็นวันหยุดในระบบแล้ว!');
+      return;
+    }
+    onUpdateHoliday({
+      id,
+      holidayDate: editDate,
+      holidayName: editName.toUpperCase(),
+      type: editType
+    });
+    setEditingId(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
   };
 
   // Modern eye-soothing styling classes based on theme status
@@ -68,67 +105,127 @@ export default function HolidayList({ holidays, onAddHoliday, onDeleteHoliday, i
             <thead className={`${tableHeaderStyle} uppercase text-[9px] tracking-widest sticky top-0 z-10`}>
               <tr>
                 <th className="py-2 px-3 w-12 text-center border-r border-slate-300 dark:border-white/10">ID</th>
-                <th className="py-2 px-3 w-36 border-r border-slate-300 dark:border-white/10">วันที่ประกาศหยุด</th>
+                <th className="py-2 px-3 w-40 border-r border-slate-300 dark:border-white/10">วันที่ประกาศหยุด</th>
                 <th className="py-2 px-3 border-r border-slate-300 dark:border-white/10">ชื่ออธิบายวันหยุดนักขัตฤกษ์</th>
-                <th className="py-2 px-3 w-44 text-center border-r border-slate-300 dark:border-white/10">ประเภทวันทำงาน</th>
-                <th className="py-2 px-3 w-16 text-center">ลบ</th>
+                <th className="py-2 px-3 w-48 text-center border-r border-slate-300 dark:border-white/10">ประเภทวันทำงาน</th>
+                <th className="py-2 px-3 w-28 text-center">ตัวเลือกจัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-dotted font-medium font-sans">
               {holidays
                 .sort((a,b) => a.holidayDate.localeCompare(b.holidayDate))
-                .map((hol, idx) => (
-                  <tr 
-                    key={hol.id} 
-                    className={`transition-colors text-[11px] ${
-                      isDark 
-                        ? 'hover:bg-white/[0.02] even:bg-[#1a1a1a]/40 bg-[#141414]' 
-                        : 'hover:bg-amber-50/40 even:bg-[#F8F9FA] bg-white'
-                    }`}
-                  >
-                    {/* Column 1: ID */}
-                    <td className={`py-2 px-3 text-center font-mono text-[10px] border-r ${sheetCellClass}`}>
-                      {idx + 1}
-                    </td>
-                    
-                    {/* Column 2: Date */}
-                    <td className={`py-2 px-3 font-mono font-bold border-r ${sheetCellClass}`}>
-                      {hol.holidayDate}
-                    </td>
-                    
-                    {/* Column 3: Name */}
-                    <td className={`py-2 px-3 font-semibold border-r ${sheetCellClass}`}>
-                      {hol.holidayName}
-                    </td>
-                    
-                    {/* Column 4: Type Badge */}
-                    <td className={`py-2 px-3 text-center border-r ${sheetCellClass}`}>
-                      <span className={`px-2 py-0.5 rounded-xs text-[9px] font-bold inline-block border ${
-                        hol.type === 'Public' 
-                          ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/30' 
-                          : 'bg-sky-50 text-sky-750 border-sky-200 dark:bg-sky-950/40 dark:text-sky-305 dark:border-sky-900/30'
-                      }`}>
-                        {hol.type === 'Public' ? 'นักขัตฤกษ์ตามกฎหมาย' : 'วันหยุดบริษัทเพิ่มเติม'}
-                      </span>
-                    </td>
-                    
-                    {/* Column 5: Action */}
-                    <td className="py-2 px-3 text-center">
-                      {hol.type !== 'Public' ? (
-                        <button
-                          id={`delete-holiday-btn-${hol.id}`}
-                          onClick={() => onDeleteHoliday(hol.id)}
-                          className="text-slate-400 hover:text-red-500 p-1 hover:bg-slate-100 dark:hover:bg-white/5 rounded-sm transition-colors cursor-pointer inline-flex items-center"
-                          title="ลบวันหยุดบริษัท"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-600 text-[9px] uppercase tracking-wider font-extrabold">LOCKED</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                .map((hol, idx) => {
+                  const isEditing = editingId === hol.id;
+                  return (
+                    <tr 
+                      key={hol.id} 
+                      className={`transition-colors text-[11px] ${isEditing ? 'bg-amber-500/10' : ''} ${
+                        isDark 
+                          ? 'hover:bg-white/[0.02] even:bg-[#1a1a1a]/40 bg-[#141414]' 
+                          : 'hover:bg-amber-50/40 even:bg-[#F8F9FA] bg-white'
+                      }`}
+                    >
+                      {/* Column 1: ID */}
+                      <td className={`py-2 text-center font-mono text-[10px] border-r ${sheetCellClass}`}>
+                        {idx + 1}
+                      </td>
+                      
+                      {/* Column 2: Date */}
+                      <td className={`py-1.5 px-2 font-mono border-r ${sheetCellClass}`}>
+                        {isEditing ? (
+                          <input
+                            type="date"
+                            value={editDate}
+                            onChange={(e) => setEditDate(e.target.value)}
+                            className="w-full text-[11px] font-mono px-1.5 py-0.5 bg-slate-50 dark:bg-[#0d0d0d] border border-slate-300 dark:border-white/10 rounded-sm text-slate-800 dark:text-white focus:outline-hidden focus:border-amber-500"
+                          />
+                        ) : (
+                          <span className="font-bold">{hol.holidayDate}</span>
+                        )}
+                      </td>
+                      
+                      {/* Column 3: Name */}
+                      <td className={`py-1.5 px-3 border-r ${sheetCellClass}`}>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="w-full text-[11px] px-1.5 py-0.5 bg-slate-50 dark:bg-[#0d0d0d] border border-slate-300 dark:border-white/10 rounded-sm text-slate-800 dark:text-white focus:outline-hidden focus:border-amber-500"
+                          />
+                        ) : (
+                          <span className="font-semibold">{hol.holidayName}</span>
+                        )}
+                      </td>
+                      
+                      {/* Column 4: Type Badge */}
+                      <td className={`py-1.5 px-2 text-center border-r ${sheetCellClass}`}>
+                        {isEditing ? (
+                          <select
+                            value={editType}
+                            onChange={(e) => setEditType(e.target.value)}
+                            className="w-full text-[10px] px-1.5 py-0.5 bg-slate-50 dark:bg-[#0d0d0d] border border-slate-300 dark:border-white/10 rounded-sm text-slate-800 dark:text-white focus:outline-hidden focus:border-amber-500"
+                          >
+                            <option value="Public">นักขัตฤกษ์ตามกฎหมาย</option>
+                            <option value="Corporate">วันหยุดบริษัทเพิ่มเติม</option>
+                          </select>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-xs text-[9px] font-bold inline-block border ${
+                            hol.type === 'Public' 
+                              ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/30' 
+                              : 'bg-sky-50 text-sky-750 border-sky-200 dark:bg-sky-950/40 dark:text-sky-305 dark:border-sky-900/30'
+                          }`}>
+                            {hol.type === 'Public' ? 'นักขัตฤกษ์ตามกฎหมาย' : 'วันหยุดบริษัทเพิ่มเติม'}
+                          </span>
+                        )}
+                      </td>
+                      
+                      {/* Column 5: Action */}
+                      <td className="py-2 px-2 text-center whitespace-nowrap">
+                        {isEditing ? (
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEdit(hol.id)}
+                              className="text-emerald-600 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 p-1 rounded-sm transition-colors cursor-pointer inline-flex items-center"
+                              title="บันทึกแก้ไข"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelEdit}
+                              className="text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-white/5 p-1 rounded-sm transition-colors cursor-pointer inline-flex items-center"
+                              title="ยกเลิก"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(hol)}
+                              className="text-blue-500 hover:text-blue-400 hover:bg-slate-150 dark:hover:bg-white/5 p-1 rounded-sm transition-colors cursor-pointer inline-flex items-center"
+                              title="แก้ไขวันหยุด"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              id={`delete-holiday-btn-${hol.id}`}
+                              type="button"
+                              onClick={() => onDeleteHoliday(hol.id)}
+                              className="text-slate-400 hover:text-red-500 hover:bg-slate-150 dark:hover:bg-white/5 p-1 rounded-sm transition-colors cursor-pointer inline-flex items-center"
+                              title="ลบวันหยุด"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>

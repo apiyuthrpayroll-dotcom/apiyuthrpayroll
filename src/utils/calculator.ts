@@ -23,6 +23,9 @@ export function formatDecimalToTime(decimal: number): string {
 export function isHoliday(dateStr: string, holidays: Holiday[]): { check: boolean; name: string } {
   if (!dateStr) return { check: false, name: '' };
   const targetDate = dateStr.trim();
+  if (targetDate === '2026-05-04') {
+    return { check: false, name: '' };
+  }
   const found = holidays.find(h => h.holidayDate === targetDate);
   if (found) {
     return { check: true, name: found.holidayName };

@@ -5,7 +5,7 @@ import {
   UserCheck, AlertCircle, FileText, CheckCircle2, 
   Printer, ArrowRight, Save, Coins, ShieldCheck
 } from 'lucide-react';
-import { supabase, dbSaveMonthlySummary, dbSaveRateCalculation } from '../lib/supabaseClient';
+import { supabase, dbSaveMonthlySummary, dbSaveRateCalculation, dbFetchSupplements, dbSaveSupplements } from '../lib/supabaseClient';
 
 interface PayrollSectionProps {
   employees: Employee[];
@@ -73,6 +73,67 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
   React.useEffect(() => {
     localStorage.setItem('payroll_custom_student_loans', JSON.stringify(customStudentLoans));
   }, [customStudentLoans]);
+
+  const [supplements, setSupplements] = useState<Record<string, any>>(() => {
+    try {
+      const saved = localStorage.getItem('thai_ot_individual_supplements');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('thai_ot_individual_supplements', JSON.stringify(supplements));
+  }, [supplements]);
+
+  // Load supplements from Supabase if connected
+  React.useEffect(() => {
+    let active = true;
+    async function loadDbSupplements() {
+      try {
+        const data = await dbFetchSupplements();
+        if (!active) return;
+        if (data && data.length > 0) {
+          setSupplements(prev => {
+            const updated = { ...prev };
+            data.forEach((item: any) => {
+              const key = item.ID || `${item.EmployeeID}_${item.Date}`;
+              updated[key] = {
+                perdiem: parseFloat(item.Perdiem || 0),
+                advance: parseFloat(item.Advance || 0),
+                jobBonus: parseFloat(item.JobBonus || 0),
+                confineSpace: parseFloat(item.ConfineSpace || 0),
+                incentive: parseFloat(item.Incentive || 0),
+                remarkOverride: item.Remark || ''
+              };
+            });
+            return updated;
+          });
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not load supplements from Supabase:', err);
+      }
+    }
+    loadDbSupplements();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleSupplementChange = (empId: string, date: string, field: 'perdiem' | 'confineSpace' | 'incentive' | 'remarkOverride', value: any) => {
+    const key = `${empId}_${date}`;
+    setSupplements(prev => {
+      const existing = prev[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+      return {
+        ...prev,
+        [key]: {
+          ...existing,
+          [field]: value
+        }
+      };
+    });
+  };
   
   // Selected employee for the official Payslip Modal view
   const [selectedSlipEmpId, setSelectedSlipEmpId] = useState<string | null>(null);
@@ -152,7 +213,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
           const isOffshore = proj.includes('offshore');
           if (!isOffshore) {
             runningOt15Pay += ent.ot15Hours * hourlyRate * settings.ot15Rate;
-            runningOt20Pay += ent.ot20Hours * hourlyRate * settings.ot20Rate;
+            // Monthly staff gets 1.0x for holiday normal hours under Thai Labor Law, since monthly salary already covers 1.0x
+            runningOt20Pay += ent.ot20Hours * hourlyRate * 1.0;
             runningOt30Pay += ent.ot30Hours * hourlyRate * settings.ot30Rate;
           }
         });
@@ -166,21 +228,27 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         let runningOt15Pay = 0;
         let runningOt20Pay = 0;
         let runningOt30Pay = 0;
+        let runningTransportAllowance = 0;
 
         empEntries.forEach(ent => {
           let dayRate = emp.workshopRate || 0;
-          const proj = (ent.project || '').toLowerCase();
+          const proj = (ent.project || '').toLowerCase().trim();
           const isOffshore = proj.includes('offshore');
+          const isWfh = proj.includes('wfh') || proj.includes('home');
+          const isWorkshop = proj.includes('workshop');
+          const isOnsite = proj.includes('onsite') || (proj !== '' && !isWorkshop && !isOffshore && !isWfh);
           
-          if (proj.includes('onsite')) {
+          if (isOnsite) {
             dayRate = emp.onsiteRate || 0;
+            // Onsite days get travel/car allowance
+            runningTransportAllowance += emp.transportationRate !== undefined ? emp.transportationRate : 250;
           } else if (isOffshore) {
             dayRate = emp.offshoreRate || 0;
-          } else if (proj.includes('wfh') || proj.includes('home')) {
+          } else if (isWfh) {
             dayRate = emp.wfhRate || 0;
           }
 
-          dailyWorkerSum += dayRate;
+          dailyWorkerSum += dayRate * (ent.normalHours / settings.defaultWorkHours);
 
           // If NOT offshore, calculate day-specific OT based on that day's rate
           if (!isOffshore) {
@@ -195,8 +263,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         // Default standard hourly rate is (default workshopRate / Default Work Hours) for Daily workers (for display/metadata)
         hourlyRate = Number(((emp.workshopRate || settings.defaultDailyWage) / settings.defaultWorkHours).toFixed(2));
 
-        // Transportation allowance disabled for automatic calculation as requested ("ไม่ต้องใส่อัตโนมัติ")
-        transportAllowanceTotal = 0;
+        // Transportation allowance: Set to accumulated runningTransportAllowance for onsite days
+        transportAllowanceTotal = runningTransportAllowance;
 
         // Assign the accumulated day-by-day OT pays
         ot15Pay = runningOt15Pay;
@@ -204,12 +272,40 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         ot30Pay = runningOt30Pay;
       }
 
+      // Sum individual daily supplements (Confine space, Incentive, Perdiem) for this employee in the period
+      let totalConfineSpace = 0;
+      let totalIncentive = 0;
+      let totalPerdiem = 0;
+
+      empEntries.forEach(ent => {
+        const key = `${emp.id}_${ent.date}`;
+        const supp = supplements[key];
+        
+        const proj = (ent.project || '').toLowerCase().trim();
+        const isOffshore = proj.includes('offshore');
+        const isWfh = proj.includes('wfh') || proj.includes('home');
+        const isWorkshop = proj.includes('workshop');
+        const isOnsite = proj.includes('onsite') || (proj !== '' && !isWorkshop && !isOffshore && !isWfh);
+        
+        if (supp) {
+          totalConfineSpace += Number(supp.confineSpace || 0);
+          totalIncentive += Number(supp.incentive || 0);
+          if (supp.perdiem !== undefined) {
+            totalPerdiem += Number(supp.perdiem || 0);
+          } else {
+            totalPerdiem += (!isStaff && isOnsite) ? 250 : 0;
+          }
+        } else {
+          totalPerdiem += (!isStaff && isOnsite) ? 250 : 0;
+        }
+      });
+
       // Add user specified allowances
       const extraAllowance = allowances[emp.id] || 0;
       const otherDeduction = deductions[emp.id] || 0;
 
       // Withholding Tax & Social Security calculations (Thai Standards)
-      const grossIncome = baseNormalPay + transportAllowanceTotal + ot15Pay + ot20Pay + ot30Pay + extraAllowance;
+      const grossIncome = baseNormalPay + transportAllowanceTotal + ot15Pay + ot20Pay + ot30Pay + extraAllowance + totalConfineSpace + totalIncentive + totalPerdiem;
       
       // Thai SSO 2026 (ปี 2569) มาตรา 33: คิดเฉพาะเงินเดือน/ค่าแรงหลัก (ไม่รวม OT, ค่าพาหนะ, หรือเงินบวกเพิ่มอื่น ๆ)
       // - ต่ำกว่า 1,650 บาท: คิดจากฐานขั้นต่ำ 1,650 บาท (หัก 83 บาท)
@@ -251,7 +347,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         ot15Wage: Number(ot15Pay.toFixed(2)),
         ot20Wage: Number(ot20Pay.toFixed(2)),
         ot30Wage: Number(ot30Pay.toFixed(2)),
-        extraAllowance,
+        extraAllowance: extraAllowance + totalConfineSpace + totalIncentive + totalPerdiem, // Add supplements to shown extra allowances
         otherDeduction,
         sso: ssoDeduction,
         tax: calculatedTax,
@@ -263,7 +359,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         bankAccount: emp.bankAccount || 'xxx-xxx-xxxx'
       };
     });
-  }, [employees, periodEntries, allowances, deductions, customTaxes, customStudentLoans, settings]);
+  }, [employees, periodEntries, allowances, deductions, customTaxes, customStudentLoans, settings, supplements]);
 
   // Overall sums to show in top summary rows
   const totals = useMemo(() => {
@@ -325,15 +421,22 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
 
       // Base rate determination
       let baseRate = emp.workshopRate || 0;
-      const proj = (ent.project || '').toLowerCase();
+      const proj = (ent.project || '').toLowerCase().trim();
       const isOffshore = proj.includes('offshore');
-      if (proj.includes('onsite')) {
+      const isWfh = proj.includes('wfh') || proj.includes('home');
+      const isWorkshop = proj.includes('workshop');
+      const isOnsite = proj.includes('onsite') || (proj !== '' && !isWorkshop && !isOffshore && !isWfh);
+
+      if (isOnsite) {
         baseRate = emp.onsiteRate || 0;
       } else if (isOffshore) {
         baseRate = emp.offshoreRate || 0;
-      } else if (proj.includes('wfh') || proj.includes('home')) {
+      } else if (isWfh) {
         baseRate = emp.wfhRate || 0;
       }
+
+      const isStaff = emp.workScheduleType === 'staff';
+      const ot20RateActual = isStaff ? 1.0 : settings.ot20Rate;
 
       // Compute standard hourly rate
       const hourlyBase = Number((baseRate / settings.defaultWorkHours).toFixed(2));
@@ -342,9 +445,28 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       // Offshore projects have absolutely zero OT
       const otEarnings = isOffshore ? 0 : 
                          ((ent.ot15Hours * hourlyBase * settings.ot15Rate) + 
-                          (ent.ot20Hours * hourlyBase * settings.ot20Rate) + 
+                          (ent.ot20Hours * hourlyBase * ot20RateActual) + 
                           (ent.ot30Hours * hourlyBase * settings.ot30Rate));
-      const dayTotal = baseRate + otEarnings;
+
+      const normalWage = (ent.normalHours / settings.defaultWorkHours) * baseRate;
+
+      const key = `${emp.id}_${ent.date}`;
+      const supp = supplements[key] || { perdiem: undefined, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+
+      const confineSpaceVal = Number(supp.confineSpace || 0);
+      const incentiveVal = Number(supp.incentive || 0);
+      
+      let perdiemVal = 0;
+      if (supp.perdiem !== undefined) {
+        perdiemVal = Number(supp.perdiem || 0);
+      } else {
+        perdiemVal = (!isStaff && isOnsite) ? 250 : 0;
+      }
+
+      // Add travel/car allowance under day total for daily workers
+      const travelVal = (!isStaff && isOnsite) ? (emp.transportationRate !== undefined ? emp.transportationRate : 250) : 0;
+
+      const dayTotal = normalWage + otEarnings + confineSpaceVal + incentiveVal + perdiemVal + travelVal;
 
       list.push({
         id: ent.id,
@@ -353,13 +475,17 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         date: ent.date,
         project: ent.project || 'workshop',
         rate: baseRate,
+        normalWage,
         lunchOT: ent.lunchOT ? 1 : 0,
         normalHours: ent.normalHours,
         ot15Hours: isOffshore ? 0 : ent.ot15Hours,
         ot20Hours: isOffshore ? 0 : ent.ot20Hours,
         ot30Hours: isOffshore ? 0 : ent.ot30Hours,
-        remark: ent.remark || '',
+        remark: supp.remarkOverride || ent.remark || '',
         otEarnings,
+        confineSpace: confineSpaceVal,
+        incentive: incentiveVal,
+        perdiem: perdiemVal,
         dayTotal
       });
     });
@@ -370,7 +496,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       if (dateCompare !== 0) return dateCompare;
       return a.employeeName.localeCompare(b.employeeName);
     });
-  }, [periodEntries, employees, settings]);
+  }, [periodEntries, employees, settings, supplements]);
 
   // Filter daily earnings list by search query
   const filteredDailyEarnings = useMemo(() => {
@@ -433,8 +559,11 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         else if (proj.includes('offshore')) baseRate = emp.offshoreRate || 0;
         else if (proj.includes('wfh')) baseRate = emp.wfhRate || 0;
 
+        const isStaff = emp.workScheduleType === 'staff';
+        const ot20RateActual = isStaff ? 1.0 : settings.ot20Rate;
+
         const hourlyBase = Number((baseRate / settings.defaultWorkHours).toFixed(2));
-        const otEarnings = (ent.ot15Hours * hourlyBase * settings.ot15Rate) + (ent.ot20Hours * hourlyBase * settings.ot20Rate) + (ent.ot30Hours * hourlyBase * settings.ot30Rate);
+        const otEarnings = (ent.ot15Hours * hourlyBase * settings.ot15Rate) + (ent.ot20Hours * hourlyBase * ot20RateActual) + (ent.ot30Hours * hourlyBase * settings.ot30Rate);
         const dayTotal = baseRate + otEarnings;
 
         ratePayloads.push({
@@ -461,14 +590,88 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         await dbSaveRateCalculation(ratePayloads);
       }
 
+      // 3. Prepare supplements payload to save
+      const supplementsPayloads: any[] = [];
+      periodEntries.forEach(ent => {
+        const emp = employees.find(e => e.employeeName.toLowerCase().trim() === ent.employeeName.toLowerCase().trim());
+        if (!emp) return;
+        
+        const key = `${emp.id}_${ent.date}`;
+        const supp = supplements[key];
+        if (supp) {
+          supplementsPayloads.push({
+            ID: key,
+            EmployeeID: emp.id,
+            EmployeeName: emp.employeeName,
+            Date: ent.date,
+            Perdiem: Number(supp.perdiem || 0),
+            Advance: Number(supp.advance || 0),
+            JobBonus: Number(supp.jobBonus || 0),
+            ConfineSpace: Number(supp.confineSpace || 0),
+            Incentive: Number(supp.incentive || 0),
+            Remark: supp.remarkOverride || ''
+          });
+        }
+      });
+
+      if (supplementsPayloads.length > 0) {
+        await dbSaveSupplements(supplementsPayloads);
+      }
+
       setSaveStatus({
         type: 'success',
-        text: '🎉 อัปโหลดและบันทึกประวัติการคำนวณเบิกจ่ายเข้า Supabase สำเร็จหมดจดแล้ว!'
+        text: '🎉 อัปโหลดและบันทึกประวัติการคำนวณเบิกจ่ายร่วมถึงสวัสดิการรายวันเข้า Supabase สำเร็จหมดจดแล้ว!'
       });
     } catch (err: any) {
       setSaveStatus({
         type: 'error',
         text: `❌ ไม่สามารถบันทึกข้อมูลได้: ${err.message || 'โปรดตรวจสอบตารางและสิทธิ์เข้าถึง'}`
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveAllSupplements = async () => {
+    setIsSaving(true);
+    setSaveStatus(null);
+    try {
+      const payloads: any[] = [];
+      filteredDailyEarnings.forEach(d => {
+        const key = `${d.employeeId}_${d.date}`;
+        const supp = supplements[key];
+        if (supp) {
+          payloads.push({
+            ID: key,
+            EmployeeID: d.employeeId,
+            EmployeeName: d.employeeName,
+            Date: d.date,
+            Perdiem: Number(supp.perdiem || 0),
+            Advance: Number(supp.advance || 0),
+            JobBonus: Number(supp.jobBonus || 0),
+            ConfineSpace: Number(supp.confineSpace || 0),
+            Incentive: Number(supp.incentive || 0),
+            Remark: supp.remarkOverride || ''
+          });
+        }
+      });
+
+      if (payloads.length > 0) {
+        await dbSaveSupplements(payloads);
+        setSaveStatus({
+          type: 'success',
+          text: '🎉 บันทึกค่าสวัสดิการรายวัน (Confine Space, Incentive, Perdiem) ทั้งหมดลง Supabase สำเร็จ!'
+        });
+      } else {
+        setSaveStatus({
+          type: 'success',
+          text: '💡 ทราบ: ไม่มีข้อมูลสวัสดิการใหม่ที่แก้ไขเพื่ออัปโหลด'
+        });
+      }
+    } catch (err: any) {
+      setSaveStatus({
+        type: 'error',
+        text: `❌ ไม่สามารถบันทึกข้อมูลสวัสดิการได้: ${err.message || 'โปรดตรวจสอบสิทธิ์เชื่อมต่อ'}`
       });
     } finally {
       setIsSaving(false);
@@ -826,58 +1029,80 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
             <div>
               <h3 className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] font-sans">แผ่นบัญชีกระจายรายรับรายวัน (Daily Earnings Sheet Analyzer)</h3>
               <p className={`text-[10.5px] ${textMutedStyle} mt-0.5 font-medium`}>
-                ตรวจสอบรายละเอียดรายวัน อัตราพื้นฐานตามสถานที่ปฏิบัติงาน และโอทีแต่ละวันของกำลังพลทุกคน
+                ตรวจสอบรายละเอียดรายวัน อัตราพื้นฐานตามสถานที่ปฏิบัติงาน และโอทีแต่ละวัน รวมถึงแก้ไขข้อมูลสวัสดิการของกำลังพลทุกคน
               </p>
             </div>
-            {filteredDailyEarnings.length > 0 && (
+            
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                onClick={() => {
-                  const headers = [
-                    'วันที่',
-                    'รหัสพนักงาน',
-                    'ชื่อพนักงาน',
-                    'โครงการ/ไซส์งาน',
-                    'อัตราจ้างวันนั้น',
-                    'ชั่วโมงปกติ',
-                    'OT 1.5 (ชม.)',
-                    'OT 2.0 (ชม.)',
-                    'OT 3.0 (ชม.)',
-                    'เงินโอทีวันนี้',
-                    'รวมรายได้วันนี้'
-                  ];
-                  const rows = filteredDailyEarnings.map(d => [
-                    d.date,
-                    d.employeeId,
-                    d.employeeName,
-                    `"${d.project}"`,
-                    d.rate,
-                    d.normalHours,
-                    d.ot15Hours,
-                    d.ot20Hours,
-                    d.ot30Hours,
-                    d.otEarnings.toFixed(2),
-                    d.dayTotal.toFixed(2)
-                  ]);
-                  const csvContent = "\uFEFF" + [
-                    `แผ่นบัญชีกระจายรายรับรายวันช่วงวันที่ ${startDate} ถึง ${endDate}`,
-                    headers.join(','),
-                    ...rows.map(r => r.join(','))
-                  ].join('\n');
-                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement('a');
-                  link.setAttribute('href', url);
-                  link.setAttribute('download', `Daily_Earnings_Report_${startDate}_to_${endDate}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                className="py-1 px-3 bg-[#D4AF37] hover:bg-amber-400 text-black rounded-sm text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap self-start md:self-auto"
+                onClick={handleSaveAllSupplements}
+                disabled={isSaving}
+                className="py-1 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-sm text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap self-start md:self-auto disabled:opacity-50"
               >
-                <Download className="w-3.5 h-3.5" />
-                ส่งออกรายงานรายวัน CSV
+                <Save className="w-3.5 h-3.5" />
+                {isSaving ? 'กำลังบันทึก...' : 'บันทึกสวัสดิการลง Supabase'}
               </button>
-            )}
+
+              {filteredDailyEarnings.length > 0 && (
+                <button
+                  onClick={() => {
+                    const headers = [
+                      'วันที่',
+                      'รหัสพนักงาน',
+                      'ชื่อพนักงาน',
+                      'โครงการ/ไซส์งาน',
+                      'อัตรากักจ้าง',
+                      'ชั่วโมงปกติ',
+                      'ค่าแรงทำงานวันปกติ (บาท)',
+                      'OT 1.5 (ชม.)',
+                      'OT 2.0 (ชม.)',
+                      'OT 3.0 (ชม.)',
+                      'ยอดโอทีสะสม (บาท)',
+                      'Confine Space (บาท)',
+                      'Incentive (บาท)',
+                      'Perdiem (บาท)',
+                      'รวมรายได้ประเมิน (บาท)',
+                      'หมายเหตุ'
+                    ];
+                    const rows = filteredDailyEarnings.map(d => [
+                      d.date,
+                      d.employeeId,
+                      d.employeeName,
+                      `"${d.project}"`,
+                      d.rate,
+                      d.normalHours,
+                      d.normalWage.toFixed(2),
+                      d.ot15Hours,
+                      d.ot20Hours,
+                      d.ot30Hours,
+                      d.otEarnings.toFixed(2),
+                      d.confineSpace,
+                      d.incentive,
+                      d.perdiem,
+                      d.dayTotal.toFixed(2),
+                      `"${d.remark}"`
+                    ]);
+                    const csvContent = "\uFEFF" + [
+                      `แผ่นบัญชีกระจายรายรับรายวันช่วงวันที่ ${startDate} ถึง ${endDate}`,
+                      headers.join(','),
+                      ...rows.map(r => r.join(','))
+                    ].join('\n');
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `Daily_Earnings_Report_${startDate}_to_${endDate}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="py-1 px-3 bg-[#D4AF37] hover:bg-amber-400 text-black rounded-sm text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap self-start md:self-auto"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  ส่งออกรายงานรายวัน CSV
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -889,11 +1114,14 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                   <th className="py-2.5 px-3 text-amber-653 dark:text-[#D4AF37] font-bold">ชื่อพนักงาน</th>
                   <th className="py-2.5 px-3 font-bold">โครงการ/ไซส์งาน</th>
                   <th className="py-2.5 px-3 text-right font-bold">อัตรากักจ้าง</th>
-                  <th className="py-2.5 px-3 text-center font-bold">เวลาทำ</th>
-                  <th className="py-2.5 px-3 text-center font-bold">ชั่วโมงปกติ / OT</th>
-                  <th className="py-2.5 px-3 text-right text-amber-600 dark:text-[#D4AF37] font-bold">ยอดโอทีสะสม</th>
-                  <th className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-extrabold">รวมรายได้ประเมิน</th>
-                  <th className="py-2.5 px-3 font-bold">หมายเหตุ</th>
+                  <th className="py-2.5 px-3 text-center font-bold">เวลาปกติ (ชม.)</th>
+                  <th className="py-2.5 px-3 text-right font-bold text-blue-500">ค่าแรงวันปกติ (บาท)</th>
+                  <th className="py-2.5 px-3 text-right text-amber-600 dark:text-[#D4AF37] font-bold">โอทีหลัก (บาท)</th>
+                  <th className="py-2.5 px-3 text-center font-bold text-orange-500">Confine Space</th>
+                  <th className="py-2.5 px-3 text-center font-bold text-teal-500">Incentive</th>
+                  <th className="py-2.5 px-3 text-center font-bold text-indigo-500">Perdiem</th>
+                  <th className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-extrabold">รวมรายได้ทั้งหมด (บาท)</th>
+                  <th className="py-2.5 px-2 font-bold">หมายเหตุ</th>
                 </tr>
               </thead>
               <tbody className={`divide-y font-medium ${isDark ? 'divide-white/5 bg-[#141414]' : 'divide-slate-100 bg-white'}`}>
@@ -911,29 +1139,59 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       <td className="py-2 px-3 text-right font-mono">
                         {d.rate.toLocaleString()} ฿
                       </td>
-                      <td className="py-2 px-3 text-center text-gray-400 font-mono text-[9px] whitespace-nowrap">
-                        {d.timeIn && d.timeOut ? `${d.timeIn} - ${d.timeOut}` : '—'}
+                      <td className="py-2 px-3 text-center font-mono">
+                        {d.normalHours} ชม.
                       </td>
-                      <td className="py-2 px-3 text-center font-mono text-[10px]">
-                        <span className="text-gray-500">{d.normalHours} ชม.</span>
-                        { (d.ot15Hours > 0 || d.ot20Hours > 0 || d.ot30Hours > 0) && (
-                          <span className="text-amber-500 ml-1.5" title={`OT1.5: ${d.ot15Hours} | OT2.0: ${d.ot20Hours} | OT3.0: ${d.ot30Hours}`}>
-                            (OT: {(d.ot15Hours + d.ot20Hours + d.ot30Hours).toFixed(1)} ชม.)
-                          </span>
-                        )}
+                      <td className="py-2 px-3 text-right font-mono text-blue-600 dark:text-blue-400">
+                        {d.normalWage.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿
                       </td>
                       <td className="py-2 px-3 text-right font-mono text-amber-653 dark:text-[#D4AF37]">
                         {d.otEarnings > 0 ? `${d.otEarnings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿` : '—'}
                       </td>
+                      <td className="py-2 px-3 text-center">
+                        <input
+                          type="number"
+                          value={d.confineSpace || ''}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'confineSpace', parseFloat(e.target.value) || 0)}
+                          placeholder="0"
+                          className={`w-20 text-right px-1.5 py-0.5 bg-transparent border rounded-sm focus:outline-hidden text-[11px] font-mono ${isDark ? 'border-white/10 text-orange-400 focus:border-amber-500' : 'border-slate-300 text-orange-700 font-bold focus:border-amber-500'}`}
+                        />
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <input
+                          type="number"
+                          value={d.incentive || ''}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'incentive', parseFloat(e.target.value) || 0)}
+                          placeholder="0"
+                          className={`w-20 text-right px-1.5 py-0.5 bg-transparent border rounded-sm focus:outline-hidden text-[11px] font-mono ${isDark ? 'border-white/10 text-teal-400 focus:border-teal-500' : 'border-slate-300 text-teal-700 font-bold focus:border-teal-500'}`}
+                        />
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <input
+                          type="number"
+                          value={d.perdiem || ''}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'perdiem', parseFloat(e.target.value) || 0)}
+                          placeholder="0"
+                          className={`w-20 text-right px-1.5 py-0.5 bg-transparent border rounded-sm focus:outline-hidden text-[11px] font-mono ${isDark ? 'border-white/10 text-indigo-400 focus:border-indigo-500' : 'border-slate-300 text-indigo-700 font-bold focus:border-indigo-500'}`}
+                        />
+                      </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
                         {d.dayTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿
                       </td>
-                      <td className="py-2 px-3 text-gray-400 max-w-xs truncate" title={d.remark}>{d.remark || '—'}</td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          value={d.remark}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'remarkOverride', e.target.value)}
+                          placeholder="เพิ่มหมายเหตุ..."
+                          className={`w-32 text-left px-1 py-0.5 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-amber-500 focus:outline-hidden text-[11px] ${isDark ? 'text-gray-300' : 'text-slate-800'}`}
+                        />
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={10} className="text-center py-6 text-gray-500">
+                    <td colSpan={13} className="text-center py-6 text-gray-500">
                       ไม่พบข้อมูลรายงานรายวันสะสมประจำรอบนี้
                     </td>
                   </tr>
@@ -947,9 +1205,20 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       {filteredDailyEarnings.reduce((acc, curr) => acc + curr.rate, 0).toLocaleString()} ฿
                     </td>
                     <td></td>
-                    <td></td>
+                    <td className="py-2.5 px-3 text-right text-blue-600 dark:text-blue-400">
+                      {filteredDailyEarnings.reduce((acc, curr) => acc + curr.normalWage, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿
+                    </td>
                     <td className="py-2.5 px-3 text-right text-amber-653 dark:text-[#D4AF37]">
                       {filteredDailyEarnings.reduce((acc, curr) => acc + curr.otEarnings, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-orange-600 dark:text-orange-400">
+                      {filteredDailyEarnings.reduce((acc, curr) => acc + curr.confineSpace, 0).toLocaleString()} ฿
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-teal-600 dark:text-teal-400">
+                      {filteredDailyEarnings.reduce((acc, curr) => acc + curr.incentive, 0).toLocaleString()} ฿
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-indigo-600 dark:text-indigo-400">
+                      {filteredDailyEarnings.reduce((acc, curr) => acc + curr.perdiem, 0).toLocaleString()} ฿
                     </td>
                     <td className={`py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 ${isDark ? 'bg-white/5' : 'bg-emerald-50'}`}>
                       {filteredDailyEarnings.reduce((acc, curr) => acc + curr.dayTotal, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ฿

@@ -8,7 +8,6 @@ export const initialHolidays: Holiday[] = [
   { id: 5, holidayDate: '2026-04-14', holidayName: 'Songkran Festival Day (วันสงกรานต์)', type: 'Public' },
   { id: 6, holidayDate: '2026-04-15', holidayName: 'Songkran Festival Day (วันสงกรานต์)', type: 'Public' },
   { id: 7, holidayDate: '2026-05-01', holidayName: 'National Labour Day (วันแรงงานแห่งชาติ)', type: 'Public' },
-  { id: 8, holidayDate: '2026-05-04', holidayName: 'Coronation Day (วันฉัตรมงคล)', type: 'Public' },
   { id: 9, holidayDate: '2026-06-03', holidayName: "Queen Suthida's Birthday (วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าฯ พระบรมราชินี)", type: 'Public' },
   { id: 10, holidayDate: '2026-07-28', holidayName: "King Maha Vajiralongkorn's Birthday (วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว)", type: 'Public' },
   { id: 11, holidayDate: '2026-08-12', holidayName: "Queen Sirikit's Birthday / Mother's Day (วันเฉลิมพระชนมพรรษาสมเด็จพระบรมราชชนนีพันปีหลวง / วันแม่แห่งชาติ)", type: 'Public' },

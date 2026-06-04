@@ -22,8 +22,23 @@ interface SupplementData {
   perdiem: number;
   advance: number;
   jobBonus: number;
+  confineSpace: number;
+  incentive: number;
   remarkOverride: string;
 }
+
+const getThaiDayName = (enDay: string) => {
+  const mapping: Record<string, string> = {
+    'Monday': 'จันทร์ (Mon)',
+    'Tuesday': 'อังคาร (Tue)',
+    'Wednesday': 'พุธ (Wed)',
+    'Thursday': 'พฤหัสบดี (Thu)',
+    'Friday': 'ศุกร์ (Fri)',
+    'Saturday': 'เสาร์ (Sat)',
+    'Sunday': 'อาทิตย์ (Sun)'
+  };
+  return mapping[enDay] || enDay;
+};
 
 export default function IndividualReport({ 
   employees, 
@@ -36,7 +51,7 @@ export default function IndividualReport({
   onDeleteEntry
 }: IndividualReportProps) {
   // Navigation tabs: "master" (aggregate overview) or "drilldown" (IKM styled monthly timesheet)
-  const [activeSubTab, setActiveSubTab] = useState<'master' | 'drilldown'>('drilldown');
+  const [activeSubTab, setActiveSubTab] = useState<'master' | 'drilldown' | 'daily-breakdown'>('drilldown');
 
   // Configured selected employee for drill-down
   const [selectedEmpName, setSelectedEmpName] = useState<string>('');
@@ -150,6 +165,8 @@ export default function IndividualReport({
                 perdiem: parseFloat(item.Perdiem || 0),
                 advance: parseFloat(item.Advance || 0),
                 jobBonus: parseFloat(item.JobBonus || 0),
+                confineSpace: parseFloat(item.ConfineSpace || 0),
+                incentive: parseFloat(item.Incentive || 0),
                 remarkOverride: item.Remark || ''
               };
             });
@@ -333,7 +350,7 @@ export default function IndividualReport({
   const handleSupplementChange = (date: string, field: keyof SupplementData, value: any) => {
     const key = `${employeeCodeInput}_${date}`;
     setSupplements(prev => {
-      const existing = prev[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+      const existing = prev[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
       return {
         ...prev,
         [key]: { ...existing, [field]: value }
@@ -438,6 +455,8 @@ export default function IndividualReport({
               Perdiem: Number(supp.perdiem || 0),
               Advance: Number(supp.advance || 0),
               JobBonus: Number(supp.jobBonus || 0),
+              ConfineSpace: Number(supp.confineSpace || 0),
+              Incentive: Number(supp.incentive || 0),
               Remark: supp.remarkOverride || ''
             });
           }
@@ -457,13 +476,16 @@ export default function IndividualReport({
                            errMsg.toLowerCase().includes('not found') || 
                            errMsg.toLowerCase().includes('does not exist') || 
                            errMsg.includes('42P01') || 
+                           errMsg.includes('42703') || 
+                           errMsg.toLowerCase().includes('confinespace') || 
+                           errMsg.toLowerCase().includes('incentive') || 
                            errMsg.includes('PGRST');
       
       if (isTableError) {
         setShowSqlHelper(true);
         setSaveStatus({
           type: 'error',
-          message: `⚠️ ไม่สำเร็จ: ตาราง 'IndividualSupplements' ยังไม่ได้สร้างบน Supabase (ข้อมูลถูกบันทึกในคอมพิวเตอร์แบบออฟไลน์แล้ว!) กรุณาใช้โค้ด SQL ด้านล่างเพื่อสร้างตาราง`
+          message: `⚠️ ไม่สำเร็จ: ตาราง 'IndividualSupplements' ยังไม่ได้สร้างหรือยังไม่ได้อัปเดตคอลัมน์ใหม่บน Supabase (ข้อมูลถูกบันทึกในคอมพิวเตอร์แบบออฟไลน์แล้ว!) กรุณาใช้โค้ด SQL ด้านล่างเพื่ออัปเกรดตาราง`
         });
       } else {
         setSaveStatus({
@@ -508,6 +530,8 @@ export default function IndividualReport({
             Perdiem: Number(supp.perdiem || 0),
             Advance: Number(supp.advance || 0),
             JobBonus: Number(supp.jobBonus || 0),
+            ConfineSpace: Number(supp.confineSpace || 0),
+            Incentive: Number(supp.incentive || 0),
             Remark: supp.remarkOverride || ''
           });
         }
@@ -534,13 +558,16 @@ export default function IndividualReport({
                            errMsg.toLowerCase().includes('not found') || 
                            errMsg.toLowerCase().includes('does not exist') || 
                            errMsg.includes('42P01') || 
+                           errMsg.includes('42703') || 
+                           errMsg.toLowerCase().includes('confinespace') || 
+                           errMsg.toLowerCase().includes('incentive') || 
                            errMsg.includes('PGRST');
       
       if (isTableError) {
         setShowSqlHelper(true);
         setSaveStatus({
           type: 'error',
-          message: `⚠️ ไม่สำเร็จ: ตาราง 'IndividualSupplements' ยังไม่ได้สร้างบน Supabase (ข้อมูลถูกบันทึกในคอมพิวเตอร์ของคุณแล้ว) ดูวิธีแก้ด้วยตาราง SQL ด้านล่าง`
+          message: `⚠️ ไม่สำเร็จ: ตาราง 'IndividualSupplements' ยังไม่ได้สร้างหรือยังไม่ได้อัปเดตคอลัมน์ใหม่บน Supabase (ข้อมูลถูกบันทึกในคอมพิวเตอร์ของคุณแล้ว) ดูวิธีแก้ด้วยตาราง SQL ด้านล่าง`
         });
       } else {
         setSaveStatus({
@@ -607,6 +634,84 @@ export default function IndividualReport({
       otValueTotal: Number(otValueTotal.toFixed(2))
     };
   }, [renderedDates, draftEntries, supplements, employeeCodeInput, hourlyRate]);
+
+  // Compute Daily Wages breakdown statistics
+  const computedWagesStats = useMemo(() => {
+    let grandNormalPay = 0;
+    let grandOtPay = 0;
+    let grandCombinedWageOt = 0;
+    let grandConfineSpace = 0;
+    let grandIncentive = 0;
+    let grandPerdiem = 0;
+    let grandWelfareTotal = 0;
+
+    const isStaff = activeEmployee?.workScheduleType === 'staff';
+
+    renderedDates.forEach(dStr => {
+      const draft = draftEntries[dStr] || {};
+      const key = `${employeeCodeInput}_${dStr}`;
+      const supp = supplements[key] || { perdiem: undefined, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+
+      const normHrs = draft.normalHours || 0;
+      const itemOt15 = draft.ot15Hours || 0;
+      const itemOt20 = draft.ot20Hours || 0;
+      const itemOt30 = draft.ot30Hours || 0;
+
+      // Day-specific rate determination
+      let localDayRate = activeEmployee?.workshopRate || 0;
+      const proj = (draft.project || '').toLowerCase().trim();
+      const isOffshore = proj.includes('offshore');
+      const isWfh = proj.includes('wfh') || proj.includes('home');
+      const isWorkshop = proj.includes('workshop');
+      const isOnsite = proj.includes('onsite') || (proj !== '' && !isWorkshop && !isOffshore && !isWfh);
+
+      if (isOnsite) {
+        localDayRate = activeEmployee?.onsiteRate || 0;
+      } else if (isOffshore) {
+        localDayRate = activeEmployee?.offshoreRate || 0;
+      } else if (isWfh) {
+        localDayRate = activeEmployee?.wfhRate || 0;
+      }
+
+      const localHourlyRate = isStaff ? hourlyRate : Number((localDayRate / (settings.defaultWorkHours || 8)).toFixed(2));
+
+      const normalPay = normHrs * localHourlyRate;
+      const otPay = isOffshore ? 0 : (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0) * localHourlyRate;
+      const combinedWageOt = normalPay + otPay;
+
+      const confineVal = Number(supp.confineSpace || 0);
+      const incentiveVal = Number(supp.incentive || 0);
+      
+      let perdiemVal = 0;
+      if (supp.perdiem !== undefined) {
+        perdiemVal = Number(supp.perdiem || 0);
+      } else {
+        perdiemVal = (!isStaff && isOnsite) ? 250 : 0;
+      }
+
+      const travelVal = (!isStaff && isOnsite) ? (activeEmployee?.transportationRate !== undefined ? activeEmployee.transportationRate : 250) : 0;
+
+      const welfareTotal = combinedWageOt + confineVal + incentiveVal + perdiemVal + travelVal;
+
+      grandNormalPay += normalPay;
+      grandOtPay += otPay;
+      grandCombinedWageOt += combinedWageOt;
+      grandConfineSpace += confineVal;
+      grandIncentive += incentiveVal;
+      grandPerdiem += perdiemVal;
+      grandWelfareTotal += welfareTotal;
+    });
+
+    return {
+      grandNormalPay,
+      grandOtPay,
+      grandCombinedWageOt,
+      grandConfineSpace,
+      grandIncentive,
+      grandPerdiem,
+      grandWelfareTotal
+    };
+  }, [renderedDates, draftEntries, supplements, employeeCodeInput, hourlyRate, activeEmployee, settings]);
 
   // Helper to resolve timesheet entries for any employee
   const getEmployeeEntryForDate = (empName: string, dStr: string) => {
@@ -786,6 +891,84 @@ export default function IndividualReport({
     document.body.removeChild(link);
   };
 
+  // Export Specific Employee Month Wages Breakdown to CSV
+  const exportWagesCSV = () => {
+    if (!activeEmployee) return;
+
+    const headers = [
+      'Day/วัน',
+      'Date/วันที่',
+      'Normal Wage (THB)/ค่าแรงปกติ',
+      'Total OT (THB)/รวมโอที',
+      'Wages + OT (THB)/รวมค่าแรง + โอที',
+      'Confine Space (THB)',
+      'Incentive (THB)',
+      'Perdiem (THB)',
+      'Total Earnings (THB)/รวมรายรับทั้งหมด',
+      'Remark/หมายเหตุ'
+    ];
+
+    const rows = renderedDates.map(dStr => {
+      const draft = draftEntries[dStr] || {};
+      const key = `${employeeCodeInput}_${dStr}`;
+      const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+      
+      const dayName = new Date(dStr).toLocaleDateString('en-US', { weekday: 'long' });
+      const dayNum = new Date(dStr).getDate();
+
+      const normHrs = draft.normalHours || 0;
+      const itemOt15 = draft.ot15Hours || 0;
+      const itemOt20 = draft.ot20Hours || 0;
+      const itemOt30 = draft.ot30Hours || 0;
+
+      const normalPay = normHrs * hourlyRate;
+      const otPay = (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0) * hourlyRate;
+      const combinedWageOt = normalPay + otPay;
+
+      const confineVal = Number(supp.confineSpace || 0);
+      const incentiveVal = Number(supp.incentive || 0);
+      const perdiemVal = Number(supp.perdiem || 0);
+
+      const welfareTotal = combinedWageOt + confineVal + incentiveVal + perdiemVal;
+
+      // Find public holiday
+      const holidayCheck = holidays.find(h => h.holidayDate === dStr);
+      const remarkText = supp.remarkOverride || draft.remark || (holidayCheck ? holidayCheck.holidayName : '');
+
+      return [
+        dayName,
+        dayNum,
+        normalPay.toFixed(2),
+        otPay.toFixed(2),
+        combinedWageOt.toFixed(2),
+        confineVal.toFixed(2),
+        incentiveVal.toFixed(2),
+        perdiemVal.toFixed(2),
+        welfareTotal.toFixed(2),
+        `"${remarkText}"`
+      ];
+    });
+
+    const csvContent = "\uFEFF" + [
+      `IKM TESTING (THAILAND) CO. LTD. - DAILY EARNINGS BREAKDOWN`,
+      `Employee Code: ${employeeCodeInput}, Employee Name: ${activeEmployee.employeeName}`,
+      `Position: ${positionInput}, Daily Rate Basis: ${(hourlyRate * (settings.defaultWorkHours || 8)).toFixed(2)} (Hourly: ${hourlyRate})`,
+      `Cutoff Period: ${startDate} to ${endDate}`,
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Daily_Earnings_${employeeCodeInput}_${activeEmployee.employeeName}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Export ENTIRE MASTER SUMMARY REPORT to CSV
   const exportMasterCSV = () => {
     const headers = [
@@ -883,6 +1066,17 @@ export default function IndividualReport({
               }`}
             >
               🗓️ ปูมรายวันเดี่ยว (IKM Time Sheet)
+            </button>
+            <button
+              id="subtab-daily-breakdown"
+              onClick={() => setActiveSubTab('daily-breakdown')}
+              className={`text-xs font-bold px-4 py-2 rounded-sm transition-all cursor-pointer ${
+                activeSubTab === 'daily-breakdown'
+                  ? 'bg-[#D4AF37] text-black shadow-sm'
+                  : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border border-white/5'
+              }`}
+            >
+              💰 เจาะลึกรายรับรายวัน (Daily Earnings)
             </button>
             <button
               onClick={() => setActiveSubTab('master')}
@@ -1222,16 +1416,22 @@ CREATE TABLE IF NOT EXISTS public."IndividualSupplements" (
     "Perdiem" NUMERIC(12, 2) DEFAULT 0.00,                  -- ค่าเดินทาง / เบี้ยเลี้ยง
     "Advance" NUMERIC(12, 2) DEFAULT 0.00,                  -- เงินเบิกสำรองล่วงหน้า
     "JobBonus" NUMERIC(12, 2) DEFAULT 0.00,                 -- โบนัสจากหน้างานพิเศษ
+    "ConfineSpace" NUMERIC(12, 2) DEFAULT 0.00,             -- ค่าอับอากาศ (Confine space)
+    "Incentive" NUMERIC(12, 2) DEFAULT 0.00,                -- ค่าแรงจูงใจ (Incentive)
     "Remark" TEXT,                                          -- หมายเหตุเพิ่มเติมสำหรับวันนั้น
     "CreatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     "UpdatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- 2. ปิดการควบคุมระดับแถว (RLS) เพื่อให้ระบบสรุปเงินสามารถอัปโหลดข้อมูลได้รวดเร็ว
+-- 2. รันเสริมสำหรับอัปเกรดตารางเก่าที่มีคอลัมน์เดิมอยู่แล้ว
+ALTER TABLE public."IndividualSupplements" ADD COLUMN IF NOT EXISTS "ConfineSpace" NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE public."IndividualSupplements" ADD COLUMN IF NOT EXISTS "Incentive" NUMERIC(12, 2) DEFAULT 0.00;
+
+-- 3. ปิดการควบคุมระดับแถว (RLS) เพื่อให้รวดเร็ว
 ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;
 
--- 3. เสริมคอมเมนต์คำอธิบายตาราง
-COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันทึกค่าเบี้ยเลี้ยง เงินเบิกสำรองสะสม และโบนัสหน้างานพิเศษรายบุคคลรายวัน';`}
+-- 4. เสริมคอมเมนต์คำอธิบายตาราง
+COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันทึกค่าเบี้ยเลี้ยง เงินเบิกสำรองสะสม และโบนัสพิเศษรายบุคคลรายวัน (Confine/Incentive)';`}
                 </pre>
                 <div className="absolute top-2 right-2 flex gap-1">
                   <button
@@ -1246,16 +1446,19 @@ CREATE TABLE IF NOT EXISTS public."IndividualSupplements" (
     "Perdiem" NUMERIC(12, 2) DEFAULT 0.00,
     "Advance" NUMERIC(12, 2) DEFAULT 0.00,
     "JobBonus" NUMERIC(12, 2) DEFAULT 0.00,
+    "ConfineSpace" NUMERIC(12, 2) DEFAULT 0.00,
+    "Incentive" NUMERIC(12, 2) DEFAULT 0.00,
     "Remark" TEXT,
     "CreatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     "UpdatedAt" TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- 2. ปิดการควบคุมระดับแถว (RLS) เพื่อให้ระบบสรุปเงินสามารถอัปโหลดข้อมูลได้รวดเร็ว
-ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;
+-- 2. รันเสริมสำหรับอัปเกรดตารางเก่าที่มีคอลัมน์เดิมอยู่แล้ว
+ALTER TABLE public."IndividualSupplements" ADD COLUMN IF NOT EXISTS "ConfineSpace" NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE public."IndividualSupplements" ADD COLUMN IF NOT EXISTS "Incentive" NUMERIC(12, 2) DEFAULT 0.00;
 
--- 3. เสริมคอมเมนต์คำอธิบายตาราง
-COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันทึกค่าเบี้ยเลี้ยง เงินเบิกสำรองสะสม และโบนัสหน้างานพิเศษรายบุคคลรายวัน';`);
+-- 3. ปิดการควบคุมระดับแถว (RLS)
+ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       setCopiedSql(true);
                       setTimeout(() => setCopiedSql(false), 2000);
                     }}
@@ -1779,6 +1982,416 @@ COMMENT ON TABLE public."IndividualSupplements" IS 'ตารางบันท�
             {/* Custom sheet printing footer line */}
             <div className="mt-6 pt-2 border-t border-slate-250 text-right text-[8px] text-slate-400 font-mono uppercase tracking-widest hidden print:block">
               : {selectedEmpName} • CONFIDENTIAL TIMESHEET LOG REPORT
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 5. TAB VIEW: DAILY EARNINGS BREAKDOWN */}
+      {activeSubTab === 'daily-breakdown' && (
+        <div className="space-y-4">
+          
+          {/* Action Header controls */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 bg-black/10 p-4 border rounded border-white/5 print:hidden">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                onClick={exportWagesCSV}
+                className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                ส่งออก CSV รายรับ
+              </button>
+              
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                พิมพ์หน้านี้ (Print PDF)
+              </button>
+
+              <button
+                onClick={handleSyncToSupabase}
+                disabled={isSaving}
+                className="flex items-center gap-1.5 bg-[#D4AF37] hover:bg-amber-400 text-black font-extrabold text-xs py-2 px-5 rounded-sm transition-all cursor-pointer shadow-md shadow-amber-500/5 disabled:opacity-40"
+              >
+                {isSaving ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    กำลังบันทึกข้อมูล...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    บันทึกสวัสดิการลง Supabase
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* SPREADSHEET CANVAS */}
+          <div className="w-full bg-white text-slate-900 border border-slate-300 shadow-sm p-4 md:p-6 rounded-xs print:p-0 print:border-none print:shadow-none font-sans">
+            
+            {/* Header Identity Block matching IKM header */}
+            <div className="flex justify-between items-start border-b border-slate-950 pb-5 mb-5 md:flex-row flex-col gap-4">
+              <div className="space-y-1.5 flex-1">
+                <div className="text-[10px] font-extrabold text-[#D4AF37] tracking-wider uppercase">COMPANY REVENUE BREAKDOWN REPORT</div>
+                <h1 className="text-sm md:text-base font-serif font-black tracking-wide text-black uppercase leading-tight">
+                  IKM TESTING & ENGINEERING (THAILAND) CO., LTD.
+                </h1>
+                <p className="text-[9px] text-slate-500 font-medium leading-relaxed font-mono">
+                  7 Moo 4, Phala-Banchang Road, Phala Sub-district, Banchang District, Rayong 21130 Thailand
+                </p>
+                <div className="pt-2">
+                  <span className="bg-[#D4AF37] text-black font-extrabold px-2 py-0.5 text-[8.5px] uppercase tracking-wider rounded-xs select-none">
+                    DAILY EARNINGS SHEET
+                  </span>
+                </div>
+              </div>
+              
+              <div className="w-full md:w-[260px] space-y-1 text-[9.5px] font-bold text-slate-500 uppercase tracking-tight font-mono">
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">WAGES Basis :</span>
+                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-extrabold text-slate-900 pl-1">
+                    THB {((activeEmployee?.workshopRate || settings.defaultDailyWage || 700)).toLocaleString()} / Day
+                  </span>
+                </div>
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Date Range :</span>
+                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-extrabold text-slate-900 pl-1 text-[9px]">
+                    {startDate.split('-').reverse().join('/')} - {endDate.split('-').reverse().join('/')}
+                  </span>
+                </div>
+                <div className="flex items-end gap-1.5">
+                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Hourly Rate :</span>
+                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-extrabold text-slate-900 pl-1">
+                    THB {hourlyRate.toLocaleString()} / Hour
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Sub header employee identity cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 border border-slate-200 p-4 mb-5 text-[11px] text-slate-900 rounded-sm font-sans">
+              <div className="space-y-1.5">
+                <div className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Employee Information / ข้อมูลพนักงาน</div>
+                <div>รหัสพนักงาน: <strong className="font-mono text-black text-xs">{employeeCodeInput || activeEmployee?.id}</strong></div>
+                <div>ชื่อ-นามสกุล : <strong className="text-black text-xs">{activeEmployee?.employeeName}</strong></div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Position & Rates / ตำแหน่งงานและประเภทอัตรา</div>
+                <div>ตำแหน่งงาน: <strong className="text-black text-xs">{positionInput}</strong></div>
+                <div>ประเภทการจ้าง: <strong className="text-black text-xs">{activeEmployee?.workScheduleType === 'staff' ? 'พนักงานประจำ (Staff)' : 'ผู้รับจ้างรายวัน (Daily Worker)'}</strong></div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Account Transfer / เลขที่บัญชีชำระเงิน</div>
+                <div>ธนาคารผู้โอน: <strong className="text-black text-xs">{activeEmployee?.bankName || 'ธนาคารกสิกรไทย (K-Bank)'}</strong></div>
+                <div>เลขบัญชีโอน: <strong className="font-mono text-black text-xs">{activeEmployee?.bankAccount || 'xxx-x-xx551-x'}</strong></div>
+              </div>
+            </div>
+
+            {/* Earnings Sheet Table Grid */}
+            <div className="border border-slate-400 overflow-hidden mb-6 rounded-xs">
+              <table className="w-full text-left text-xs text-slate-900 table-fixed border-collapse">
+                
+                <thead className="bg-slate-100 text-slate-700 text-[10px] uppercase font-bold text-center border-b border-slate-400 font-mono tracking-tight">
+                  <tr className="divide-x divide-slate-400 text-[9.5px]">
+                    <th className="py-2 px-1.5 w-[110px] shrink-0">วัน (Day)</th>
+                    <th className="py-2 px-0.5 w-[50px] shrink-0">วันที่ (Date)</th>
+                    <th className="py-2 px-1 w-[90px] text-sky-850">ค่าแรงทำงานวันปกติ (บาท)</th>
+                    <th className="py-2 px-1 w-[90px] text-emerald-850">รวมโอที (บาท)</th>
+                    <th className="py-2 px-1 w-[110px] text-slate-900 font-extrabold bg-slate-50">รวมค่าแรง + โอที (บาท)</th>
+                    <th className="py-2 px-1 w-[80px] text-[#8b5cf6]">Confine space</th>
+                    <th className="py-2 px-1 w-[80px] text-pink-750">Incentive</th>
+                    <th className="py-2 px-1 w-[80px] text-amber-750">Perdiem</th>
+                    <th className="py-2 px-1 w-[125px] text-emerald-950 font-black bg-emerald-50">รวมค่าแรง + โอที + สวัสดิการ (บาท)</th>
+                    <th className="py-2 px-1 w-[110px]">หมายเหตุ (Remark)</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-200">
+                  {renderedDates.map((dStr, idx) => {
+                    const draft = draftEntries[dStr] || {};
+                    const key = `${employeeCodeInput}_${dStr}`;
+                    const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+
+                    const dateObj = new Date(dStr);
+                    const dayNum = dateObj.getDate();
+                    const dayOfWeekStr = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+                    const thaiDayName = getThaiDayName(dayOfWeekStr);
+                    
+                    const dayVal = dateObj.getDay();
+                    const isSunday = dayVal === 0;
+                    const isSaturday = dayVal === 6;
+
+                    // Public Holiday matching check
+                    const optHoliday = holidays.find(h => h.holidayDate === dStr);
+                    const isPubHoliday = !!optHoliday;
+
+                    // Compute specific OT Value and daily rate pay
+                    const isStaff = activeEmployee?.workScheduleType === 'staff';
+                    let localDayRate = activeEmployee?.workshopRate || 0;
+                    const proj = (draft.project || '').toLowerCase().trim();
+                    const isOffshore = proj.includes('offshore');
+                    const isWfh = proj.includes('wfh') || proj.includes('home');
+                    const isWorkshop = proj.includes('workshop');
+                    const isOnsite = proj.includes('onsite') || (proj !== '' && !isWorkshop && !isOffshore && !isWfh);
+
+                    if (isOnsite) {
+                      localDayRate = activeEmployee?.onsiteRate || 0;
+                    } else if (isOffshore) {
+                      localDayRate = activeEmployee?.offshoreRate || 0;
+                    } else if (isWfh) {
+                      localDayRate = activeEmployee?.wfhRate || 0;
+                    }
+
+                    const localHourlyRate = isStaff ? hourlyRate : Number((localDayRate / (settings.defaultWorkHours || 8)).toFixed(2));
+
+                    const itemOt15 = draft.ot15Hours || 0;
+                    const itemOt20 = draft.ot20Hours || 0;
+                    const itemOt30 = draft.ot30Hours || 0;
+                    const otPay = isOffshore ? 0 : (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0) * localHourlyRate;
+                    
+                    const normalPay = (draft.normalHours || 0) * localHourlyRate;
+                    const combWageOt = normalPay + otPay;
+
+                    const confineVal = Number(supp.confineSpace || 0);
+                    const incentiveVal = Number(supp.incentive || 0);
+                    
+                    let perdiemVal = 0;
+                    if (supp.perdiem !== undefined) {
+                      perdiemVal = Number(supp.perdiem || 0);
+                    } else {
+                      perdiemVal = (!isStaff && isOnsite) ? 250 : 0;
+                    }
+
+                    const travelVal = (!isStaff && isOnsite) ? (activeEmployee?.transportationRate !== undefined ? activeEmployee.transportationRate : 250) : 0;
+
+                    const finalTotalEarning = combWageOt + confineVal + incentiveVal + perdiemVal + travelVal;
+
+                    // Styles for Saturday / Sunday / Holiday matching image perfectly
+                    let rowBgClass = 'bg-white';
+                    let dayTextClass = 'text-slate-700 font-medium';
+                    
+                    if (isPubHoliday) {
+                      rowBgClass = 'bg-[#FFFEA3] print:bg-[#FFFEA3]'; // Bright Gold Canary Yellow
+                      dayTextClass = 'text-amber-800 font-extrabold';
+                    } else if (isSaturday) {
+                      rowBgClass = 'bg-[#ECECEC]/70 print:bg-[#ECECEC]/60'; // Gray
+                      dayTextClass = 'text-purple-700 font-bold';
+                    } else if (isSunday) {
+                      rowBgClass = 'bg-[#ECECEC]/70 print:bg-[#ECECEC]/60'; // Gray
+                      dayTextClass = 'text-red-650 font-bold';
+                    }
+
+                    // Checks Leave style
+                    const defaultRemark = optHoliday ? optHoliday.holidayName : '';
+                    const finalRemark = supp.remarkOverride || draft.remark || defaultRemark;
+                    const labelLower = finalRemark.toLowerCase();
+                    const isLeaveDay = labelLower.includes('leave') || labelLower.includes('ลา');
+                    if (isLeaveDay) {
+                      rowBgClass = 'bg-[#FEEDD1]'; // Sand / Soft peach
+                    }
+
+                    return (
+                      <tr 
+                        key={dStr} 
+                        className={`divide-x divide-slate-200 text-center text-[11px] h-9 hover:bg-slate-50/50 print:hover:none ${rowBgClass}`}
+                      >
+                        {/* Day of Week */}
+                        <td className={`py-1 px-1.5 text-left font-sans text-[10.5px] ${dayTextClass}`}>
+                          {thaiDayName}
+                        </td>
+
+                        {/* Date Number */}
+                        <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-800">
+                          {dayNum}
+                        </td>
+
+                        {/* ค่าแรงทำงานวันปกติ */}
+                        <td className="py-1 px-1 font-mono text-right text-sky-850 font-semibold pr-2">
+                          {normalPay > 0 ? normalPay.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
+                        </td>
+
+                        {/* รวมโอที */}
+                        <td className="py-1 px-1 font-mono text-right text-emerald-850 font-semibold pr-2">
+                          {otPay > 0 ? otPay.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
+                        </td>
+
+                        {/* รวมค่าแรง + โอที */}
+                        <td className="py-1 px-1 font-mono text-right font-bold text-slate-900 bg-slate-50/40 pr-2">
+                          {combWageOt > 0 ? combWageOt.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
+                        </td>
+
+                        {/* Confine Space Input */}
+                        <td className="py-0.5 px-0.5 bg-violet-50/10">
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={supp.confineSpace || ''}
+                            onChange={(e) => handleSupplementChange(dStr, 'confineSpace', parseFloat(e.target.value) || 0)}
+                            className="w-full text-right py-1 px-1.5 bg-transparent border-0 border-b border-transparent hover:border-violet-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-violet-800 text-[11px] print:border-none print:p-0"
+                          />
+                        </td>
+
+                        {/* Incentive Input */}
+                        <td className="py-0.5 px-0.5 bg-pink-50/10">
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={supp.incentive || ''}
+                            onChange={(e) => handleSupplementChange(dStr, 'incentive', parseFloat(e.target.value) || 0)}
+                            className="w-full text-right py-1 px-1.5 bg-transparent border-0 border-b border-transparent hover:border-pink-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-pink-750 text-[11px] print:border-none print:p-0"
+                          />
+                        </td>
+
+                        {/* Perdiem Input */}
+                        <td className="py-0.5 px-0.5 bg-amber-50/10">
+                          <input
+                            type="number"
+                            placeholder={(!isStaff && isOnsite) ? "250" : "0"}
+                            value={supp.perdiem !== undefined ? (supp.perdiem || '0') : ((!isStaff && isOnsite) ? '250' : '')}
+                            onChange={(e) => {
+                              const v = e.target.value === '' ? undefined : (parseFloat(e.target.value) || 0);
+                              handleSupplementChange(dStr, 'perdiem', v);
+                            }}
+                            className="w-full text-right py-1 px-1.5 bg-transparent border-0 border-b border-transparent hover:border-amber-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-amber-805 text-[11px] print:border-none print:p-0"
+                          />
+                        </td>
+
+                        {/* รวมค่าแรง + โอที + สวัสดิการ */}
+                        <td className="py-1 px-1 font-mono text-right font-black text-emerald-950 bg-emerald-50/70 pr-2.5 text-[11.5px]">
+                          {finalTotalEarning > 0 ? finalTotalEarning.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
+                        </td>
+
+                        {/* Remarks Input */}
+                        <td className="py-0.5 px-1 text-left">
+                          <input
+                            type="text"
+                            placeholder="——"
+                            value={finalRemark}
+                            onChange={(e) => handleSupplementChange(dStr, 'remarkOverride', e.target.value)}
+                            className="w-full text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-350 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-700 text-[10px] italic truncate print:border-none print:p-0"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+
+                {/* TABLE FOOTER SUM ROW */}
+                <tfoot className="bg-slate-100 text-[10.5px] font-extrabold border-t border-slate-400 font-mono divide-y divide-slate-400 text-slate-900">
+                  <tr className="divide-x divide-slate-400">
+                    <td colSpan={2} className="py-2.5 px-4 text-right uppercase tracking-wider text-[9px] text-slate-600">รวมสะสม (Row Totals):</td>
+                    
+                    {/* Normal Pay sum */}
+                    <td className="py-2.5 px-1 text-right text-sky-850 pr-2 font-mono font-bold bg-slate-50/40">
+                      {computedWagesStats.grandNormalPay.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </td>
+
+                    {/* OT Pay sum */}
+                    <td className="py-2.5 px-1 text-right text-emerald-850 pr-2 font-mono font-bold bg-slate-50/40">
+                      {computedWagesStats.grandOtPay.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </td>
+
+                    {/* Wage + OT sum */}
+                    <td className="py-2.5 px-1 text-right text-slate-950 pr-2 font-mono font-black bg-slate-100">
+                      {computedWagesStats.grandCombinedWageOt.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </td>
+
+                    {/* Confine Space sum */}
+                    <td className="py-2.5 px-1 text-right text-violet-900 pr-2 font-mono bg-slate-50/20">
+                      {computedWagesStats.grandConfineSpace.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </td>
+
+                    {/* Incentive sum */}
+                    <td className="py-2.5 px-1 text-right text-pink-900 pr-2 font-mono bg-slate-50/20">
+                      {computedWagesStats.grandIncentive.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </td>
+
+                    {/* Perdiem sum */}
+                    <td className="py-2.5 px-1 text-right text-amber-900 pr-2 font-mono bg-slate-50/20">
+                      {computedWagesStats.grandPerdiem.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                    </td>
+
+                    {/* Welfare grand total */}
+                    <td className="py-2.5 px-1 text-right text-emerald-950 pr-2.5 font-sans font-black bg-emerald-100 text-[12px]">
+                      {computedWagesStats.grandWelfareTotal.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ฿
+                    </td>
+
+                    {/* Empty cell for remark */}
+                    <td className="bg-slate-50" />
+                  </tr>
+                </tfoot>
+
+              </table>
+            </div>
+
+            {/* Authentications Signature block */}
+            <div className="grid grid-cols-4 gap-4 pt-4 text-center text-xs text-slate-800 font-medium">
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Issued by :</span>
+                <div className="flex flex-col items-center">
+                  <span className="font-serif italic text-slate-650 mb-0.5" style={{ fontFamily: 'Dancing Script, cursive' }}>Ananta S.</span>
+                  <input
+                    type="text"
+                    value={issuedByInput}
+                    onChange={(e) => setIssuedByInput(e.target.value)}
+                    className="border-b border-slate-300 bg-transparent text-center text-slate-900 font-bold focus:outline-hidden font-sans text-[11px] w-full max-w-[120px]"
+                  />
+                  <div className="text-[8px] text-slate-400 mt-1 uppercase">Date: {endDate.split('-').reverse().join('/')}</div>
+                </div>
+              </div>
+
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Check by :</span>
+                <div className="flex flex-col items-center">
+                  <span className="font-serif italic text-slate-650 mb-0.5">Ananta S.</span>
+                  <input
+                    type="text"
+                    value={checkedByInput}
+                    onChange={(e) => setCheckedByInput(e.target.value)}
+                    className="border-b border-slate-300 bg-transparent text-center text-slate-900 font-bold focus:outline-hidden font-sans text-[11px] w-full max-w-[120px]"
+                  />
+                  <div className="text-[8px] text-slate-400 mt-1 uppercase">Date: {endDate.split('-').reverse().join('/')}</div>
+                </div>
+              </div>
+
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <div className="flex items-center justify-center gap-1">
+                  <span className="text-[10px] text-emerald-600 uppercase font-extrabold tracking-wider block">Approval :</span>
+                  <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.2 rounded-sm border border-emerald-200">Corporate</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="font-serif italic text-emerald-600 font-black mb-0.5">Apiyut N.</span>
+                  <input
+                    type="text"
+                    value={approvedByInput}
+                    onChange={(e) => setApprovedByInput(e.target.value)}
+                    className="border-b border-slate-300 bg-transparent text-center text-emerald-700 font-extrabold focus:outline-hidden font-sans text-[11px] w-full max-w-[120px]"
+                  />
+                  <div className="text-[8px] text-slate-400 mt-1 uppercase">Date: {endDate.split('-').reverse().join('/')}</div>
+                </div>
+              </div>
+
+              <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Employee Signature:</span>
+                <div className="flex flex-col items-center">
+                  <span className="text-slate-400 select-none pb-1 font-mono text-[9px] block mb-1">Underline Signature</span>
+                  <div className="border-b border-slate-300 w-full max-w-[125px] h-0"></div>
+                  <div className="text-[9.5px] font-bold text-slate-700 mt-1.5 truncate max-w-[130px]" title={selectedEmpName}>
+                    : {selectedEmpName}
+                  </div>
+                  <div className="text-[8px] text-slate-400 uppercase mt-0.5">Date: __/__/____</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Print footer secret sign */}
+            <div className="mt-6 pt-2 border-t border-slate-250 text-right text-[8px] text-slate-400 font-mono uppercase tracking-widest hidden print:block">
+              : {selectedEmpName} • REVENUE AND WAGES BREAKDOWN REPORT
             </div>
 
           </div>
