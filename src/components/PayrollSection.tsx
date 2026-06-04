@@ -240,8 +240,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
           
           if (isOnsite) {
             dayRate = emp.onsiteRate || 0;
-            // Onsite days get travel/car allowance
-            runningTransportAllowance += emp.transportationRate !== undefined ? emp.transportationRate : 250;
+            // Onsite days travel/car allowance automatic addition disabled
+            runningTransportAllowance += 0;
           } else if (isOffshore) {
             dayRate = emp.offshoreRate || 0;
           } else if (isWfh) {
@@ -290,13 +290,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         if (supp) {
           totalConfineSpace += Number(supp.confineSpace || 0);
           totalIncentive += Number(supp.incentive || 0);
-          if (supp.perdiem !== undefined) {
-            totalPerdiem += Number(supp.perdiem || 0);
-          } else {
-            totalPerdiem += (!isStaff && isOnsite) ? 250 : 0;
-          }
-        } else {
-          totalPerdiem += (!isStaff && isOnsite) ? 250 : 0;
+          totalPerdiem += Number(supp.perdiem || 0);
         }
       });
 
@@ -456,15 +450,10 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       const confineSpaceVal = Number(supp.confineSpace || 0);
       const incentiveVal = Number(supp.incentive || 0);
       
-      let perdiemVal = 0;
-      if (supp.perdiem !== undefined) {
-        perdiemVal = Number(supp.perdiem || 0);
-      } else {
-        perdiemVal = (!isStaff && isOnsite) ? 250 : 0;
-      }
+      const perdiemVal = Number(supp.perdiem || 0);
 
-      // Add travel/car allowance under day total for daily workers
-      const travelVal = (!isStaff && isOnsite) ? (emp.transportationRate !== undefined ? emp.transportationRate : 250) : 0;
+      // Add travel/car allowance under day total for daily workers - disabled
+      const travelVal = 0;
 
       const dayTotal = normalWage + otEarnings + confineSpaceVal + incentiveVal + perdiemVal + travelVal;
 

@@ -682,16 +682,8 @@ export default function IndividualReport({
       const confineVal = Number(supp.confineSpace || 0);
       const incentiveVal = Number(supp.incentive || 0);
       
-      let perdiemVal = 0;
-      if (supp.perdiem !== undefined) {
-        perdiemVal = Number(supp.perdiem || 0);
-      } else {
-        perdiemVal = (!isStaff && isOnsite) ? 250 : 0;
-      }
-
-      const travelVal = (!isStaff && isOnsite) ? (activeEmployee?.transportationRate !== undefined ? activeEmployee.transportationRate : 250) : 0;
-
-      const welfareTotal = combinedWageOt + confineVal + incentiveVal + perdiemVal + travelVal;
+      const perdiemVal = Number(supp.perdiem || 0);
+      const welfareTotal = combinedWageOt + confineVal + incentiveVal + perdiemVal;
 
       grandNormalPay += normalPay;
       grandOtPay += otPay;
@@ -2160,16 +2152,8 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                     const confineVal = Number(supp.confineSpace || 0);
                     const incentiveVal = Number(supp.incentive || 0);
                     
-                    let perdiemVal = 0;
-                    if (supp.perdiem !== undefined) {
-                      perdiemVal = Number(supp.perdiem || 0);
-                    } else {
-                      perdiemVal = (!isStaff && isOnsite) ? 250 : 0;
-                    }
-
-                    const travelVal = (!isStaff && isOnsite) ? (activeEmployee?.transportationRate !== undefined ? activeEmployee.transportationRate : 250) : 0;
-
-                    const finalTotalEarning = combWageOt + confineVal + incentiveVal + perdiemVal + travelVal;
+                    const perdiemVal = Number(supp.perdiem || 0);
+                    const finalTotalEarning = combWageOt + confineVal + incentiveVal + perdiemVal;
 
                     // Styles for Saturday / Sunday / Holiday matching image perfectly
                     let rowBgClass = 'bg-white';
@@ -2251,8 +2235,8 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                         <td className="py-0.5 px-0.5 bg-amber-50/10">
                           <input
                             type="number"
-                            placeholder={(!isStaff && isOnsite) ? "250" : "0"}
-                            value={supp.perdiem !== undefined ? (supp.perdiem || '0') : ((!isStaff && isOnsite) ? '250' : '')}
+                            placeholder="0"
+                            value={supp.perdiem !== undefined ? supp.perdiem : ''}
                             onChange={(e) => {
                               const v = e.target.value === '' ? undefined : (parseFloat(e.target.value) || 0);
                               handleSupplementChange(dStr, 'perdiem', v);
