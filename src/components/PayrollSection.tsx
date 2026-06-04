@@ -27,6 +27,9 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
   // Selected employee for the official Payslip Modal view
   const [selectedSlipEmpId, setSelectedSlipEmpId] = useState<string | null>(null);
   
+  // Custom printing mode
+  const [printMode, setPrintMode] = useState<'all_slips' | 'core_matrix' | null>(null);
+  
   // Database status
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -584,12 +587,30 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
 
       {subTab === 'summaries' ? (
         <div className={`${cardBgStyle} overflow-hidden text-left`}>
-          <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-white/10' : 'border-slate-205 bg-[#f8f9fa]'}`}>
+          <div className={`p-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isDark ? 'border-white/10' : 'border-slate-205 bg-[#f8f9fa]'}`}>
             <div>
               <h3 className="text-xs font-bold uppercase tracking-widest text-amber-653 dark:text-[#D4AF37] font-sans">สรุปแผ่นจ่ายเงินเดือนและโอทีระดับบุคคล (Payroll Core Matrix)</h3>
               <p className={`text-[10.5px] ${textMutedStyle} mt-0.5 font-medium`}>
                 ประกอบด้วยข้อมูลวันเข้ากะคำนวณเบิก และช่องปรับแต่งอื่นเพิ่มรายจ่าย-รายรับ ชั่วคราวรายจ่ายเฉพาะบุคคล
               </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                onClick={() => setPrintMode('all_slips')}
+                disabled={filteredPayroll.length === 0}
+                className="py-1.5 px-3 bg-[#5c5ee6] hover:bg-[#4345d9] text-white rounded text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-all border border-[#5c5ee6]/10 shadow-xs hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 whitespace-nowrap"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                พิมพ์สลิปพนักงานทุกคน (A4-แนวตั้ง)
+              </button>
+              <button
+                onClick={() => setPrintMode('core_matrix')}
+                disabled={filteredPayroll.length === 0}
+                className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-all border border-emerald-600/10 shadow-xs hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 whitespace-nowrap"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                พิมพ์สรุปทำจ่าย (Core Matrix)
+              </button>
             </div>
           </div>
 
@@ -1018,6 +1039,379 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
             {/* Print footer notice */}
             <div className="text-xs text-gray-500 font-mono text-center pt-3 border-t border-white/5">
               ออกแบบรองรับสัดส่วนเอกสาร A5 หรือ carbon slip ได้อย่างประณีต
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM PRINT MEDIA STYLES INJECTED DYNAMICALLY */}
+      {printMode !== null && (
+        <style dangerouslySetInnerHTML={{ __html: `
+          @media print {
+            body {
+              background: white !important;
+              color: black !important;
+            }
+            #root > *:not(#print-backdrop-container),
+            header,
+            footer,
+            nav,
+            aside,
+            button,
+            .print-hidden,
+            .no-print {
+              display: none !important;
+              visibility: hidden !important;
+            }
+            #print-backdrop-container,
+            #print-backdrop-container * {
+              visibility: visible !important;
+            }
+            #print-backdrop-container {
+              display: block !important;
+              position: absolute !important;
+              left: 0 !important;
+              top: 0 !important;
+              width: 100% !important;
+              background: white !important;
+              color: black !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: visible !important;
+              height: auto !important;
+            }
+            #print-root-content {
+              display: flex !important;
+              flex-direction: column !important;
+              width: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: white !important;
+            }
+            .print-page {
+              padding: 0 !important;
+              margin: 0 !important;
+              border: none !important;
+              box-shadow: none !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              min-height: auto !important;
+              page-break-after: always !important;
+              break-after: page !important;
+              background: white !important;
+              color: black !important;
+            }
+            table {
+              border-collapse: collapse !important;
+              width: 100% !important;
+            }
+            th, td {
+              border-color: #000000 !important;
+              color: #000000 !important;
+            }
+          }
+        ` }} />
+      )}
+
+      {/* ALL SLIPS BATCH PRINT VIEW OVERLAY */}
+      {printMode === 'all_slips' && (
+        <div id="print-backdrop-container" className="fixed inset-0 bg-[#0c0d0e] z-50 overflow-y-auto flex flex-col items-center p-6 space-y-6">
+          {/* Top Control panel */}
+          <div className="bg-[#181a1c]/95 border border-white/10 p-4 rounded shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between w-full max-w-5xl gap-4 sticky top-0 z-50 print-hidden">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded bg-[#5c5ee6]/10 flex items-center justify-center text-[#5c5ee6]">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-extrabold text-sm text-white">ระบบจัดการและพรีวิวพิมพ์สลิปพนักงานรายบุคคล (A4 Portrait แยกคนละหน้า)</h3>
+                <p className="text-xs text-gray-400">ประมวลรอบวันที่: {startDate} ถึง {endDate} • มีพนักงานรองรับพิมพ์ทั้งหมด {filteredPayroll.length} คน</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => window.print()}
+                className="py-2 px-4 bg-[#5c5ee6] hover:bg-[#4345d9] text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+              >
+                <Printer className="w-4 h-4" />
+                สั่งพิมพ์ / บันทึก PDF ทุกคน
+              </button>
+              <button
+                onClick={() => setPrintMode(null)}
+                className="py-2 px-4 bg-zinc-850 hover:bg-zinc-800 text-gray-300 text-xs font-bold rounded cursor-pointer transition-colors border border-white/5"
+              >
+                ย้อนกลับ / ปิดหน้านี้
+              </button>
+            </div>
+          </div>
+
+          {/* Staged sheets list */}
+          <div id="print-root-content" className="w-full flex flex-col gap-8 items-center pb-20">
+            {filteredPayroll.map((empSlip, idx) => (
+              <div
+                key={empSlip.id}
+                className="bg-white text-black p-10 shadow-2xl border border-gray-350 w-full max-w-[210mm] min-h-[297mm] flex flex-col justify-between print-page text-left pr-12 pl-12"
+                style={{ pageBreakAfter: 'always', breakAfter: 'page' }}
+              >
+                {/* Slip Header banner */}
+                <div className="text-center space-y-1 pb-4 border-b-2 border-black">
+                  <h4 className="text-md font-serif uppercase tracking-widest font-extrabold text-black">ใบแจ้งยอดเงินเดือนและค่าตอบแทนทำงานวิชาชีพ</h4>
+                  <p className="text-[11.5px] text-gray-700 font-bold uppercase tracking-wide">IKM TESTING (THAILAND) CO., LTD.</p>
+                  <p className="text-[10.5px] text-gray-500 font-medium font-mono">
+                    รอบประมวลตัดรอบจ่ายประจำช่วงวันที่: <span className="font-bold underline text-black">{startDate}</span> ถึงวันที่ <span className="font-bold underline text-black">{endDate}</span>
+                  </p>
+                </div>
+
+                {/* Employee metadata details info panel */}
+                <div className="grid grid-cols-2 gap-y-1.5 text-xs pb-4 border-b border-gray-300 font-mono mt-5">
+                  <div>รหัสผู้บันทึก: <strong className="font-sans text-[12.5px] text-black">{empSlip.id}</strong></div>
+                  <div>ชื่อนามสกุลพนักงาน: <strong className="font-sans text-[12.5px] text-black">{empSlip.name}</strong></div>
+                  <div>ตำแหน่งงาน: <strong className="font-sans text-black">{empSlip.position}</strong></div>
+                  <div>ประเภทสัญญาจ้าง: <strong className="font-sans text-black">{empSlip.scheduleType}</strong></div>
+                  <div>เลขบัญชีโอนรับเงิน: <strong className="font-sans text-black">{empSlip.bankName} - {empSlip.bankAccount}</strong></div>
+                  <div>วันลงเวลารอบทำ: <strong className="font-sans text-black">{empSlip.daysWorked} วันปฏิบัติงาน</strong></div>
+                </div>
+
+                {/* Two columns: Earnings & Deductions */}
+                <div className="grid grid-cols-2 border-r border-t border-b border-gray-400 text-xs mt-6 grow content-start">
+                  {/* Earnings List COLUMN */}
+                  <div className="border-l border-[#000] divide-y divide-gray-300">
+                    <div className="bg-gray-100 p-1.5 font-bold text-center border-b border-gray-400 text-black">รายการรายรับได้รับ (Earnings)</div>
+                    <div className="p-1 px-3 flex justify-between text-black">
+                      <span>เงินค่าจ้างมูลฐานสะสม</span>
+                      <strong>{empSlip.baseNormalPay.toLocaleString()}</strong>
+                    </div>
+                    <div className="p-1 px-3 flex justify-between text-black">
+                      <span>ค่าล่วงเวลาสะสม (OT 1.5)</span>
+                      <strong>{empSlip.ot15Wage.toLocaleString()}</strong>
+                    </div>
+                    <div className="p-1 px-3 flex justify-between text-black">
+                      <span>ค่าทำงานเสาร์/วันหยุด (OT 2.0)</span>
+                      <strong>{empSlip.ot20Wage.toLocaleString()}</strong>
+                    </div>
+                    <div className="p-1 px-3 flex justify-between text-black">
+                      <span>ค่าล่วงเวลาลากหยุด (OT 3.0)</span>
+                      <strong>{empSlip.ot30Wage.toLocaleString()}</strong>
+                    </div>
+                    {empSlip.transportAllowance > 0 && (
+                      <div className="p-1 px-3 flex justify-between text-black">
+                        <span>ค่าเดินทาง / รถส่วนบุคคล</span>
+                        <strong>{empSlip.transportAllowance.toLocaleString()}</strong>
+                      </div>
+                    )}
+                    <div className="p-1 px-3 flex justify-between bg-amber-50/50 text-black">
+                      <span>รายรับอื่น / Other Income</span>
+                      <strong>{empSlip.extraAllowance.toLocaleString()}</strong>
+                    </div>
+
+                    <div className="p-1.5 bg-gray-150 text-right font-extrabold border-t border-gray-450 flex justify-between text-black mt-auto">
+                      <span>รายได้รวม (Gross)</span>
+                      <span>{empSlip.totalIncome.toLocaleString()} ฿</span>
+                    </div>
+                  </div>
+
+                  {/* Deductions COLUMN */}
+                  <div className="border-l border-r border-[#000] divide-y divide-gray-300">
+                    <div className="bg-gray-100 p-1.5 font-bold text-center border-b border-gray-400 text-black">รายการหักลบ ณ จ่าย (Deductions)</div>
+                    <div className="p-1 px-3 flex justify-between text-black">
+                      <span>ภาษีหัก ณ ที่จ่าย 3%</span>
+                      <strong>{empSlip.tax.toLocaleString()}</strong>
+                    </div>
+                    <div className="p-1 px-3 flex justify-between text-black">
+                      <span>เงินสมทบกองประกันสังคม</span>
+                      <strong>{empSlip.sso.toLocaleString()}</strong>
+                    </div>
+                    {empSlip.studentLoan > 0 ? (
+                      <div className="p-1 px-3 flex justify-between text-black">
+                        <span>หักลบหนี้ กยศ. สังกัดรัฐ</span>
+                        <strong>{empSlip.studentLoan.toLocaleString()}</strong>
+                      </div>
+                    ) : (
+                      <div className="p-1 px-3 flex justify-between text-gray-400">
+                        <span>หักหนี้ กยศ.</span>
+                        <span>—</span>
+                      </div>
+                    )}
+                    <div className="p-1 px-3 flex justify-between bg-red-50/30 text-black">
+                      <span>เงินหักอื่น / Other Deduction</span>
+                      <strong>{empSlip.otherDeduction.toLocaleString()}</strong>
+                    </div>
+
+                    <div className="p-1 px-3 flex justify-between text-gray-400">
+                      <span>ค่าปรับขาดลาสาย</span>
+                      <span>—</span>
+                    </div>
+                    <div className="p-1 px-3 flex justify-between text-gray-400">
+                      <span>หักลบสะสมอื่นๆ</span>
+                      <span>—</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-150 text-right font-extrabold border-t border-gray-450 flex justify-between text-black mt-auto">
+                      <span>รวมรายการหัก (Deduction)</span>
+                      <span>{empSlip.totalDeductions.toLocaleString()} ฿</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Net Earnings visual Slate */}
+                <div className="bg-gray-100 p-4 border border-black rounded flex flex-col md:flex-row justify-between items-center text-xs font-mono font-bold mt-6">
+                  <div className="text-gray-750">ตัวอักษรรวมจ่ายสุทธิ: <span className="font-sans text-black font-extrabold">{thaiBahtText(empSlip.netIncome)}</span></div>
+                  <div className="text-md font-extrabold text-black font-sans mt-1 md:mt-0">ยอดโอนสุทธิโอนเข้าบัญชีพนักงาน: <span className="underline underline-offset-4 text-base font-extrabold text-emerald-600">{empSlip.netIncome.toLocaleString()} บาท</span></div>
+                </div>
+
+                {/* Signature Blocks */}
+                <div className="grid grid-cols-2 gap-10 pt-8 text-center text-xs text-gray-650 mt-8">
+                  <div className="border-t border-gray-300 pt-3">
+                    <div className="h-6"></div>
+                    <p className="font-bold text-black">(___________________________)</p>
+                    <p className="mt-1">ผู้จัดทำ / ฝ่ายการเงิน และบริหารเงินเดือน</p>
+                    <p className="text-[10px] text-gray-400">วันที่โอนจ่าย: {endDate}</p>
+                  </div>
+                  <div className="border-t border-gray-300 pt-3">
+                    <div className="h-6"></div>
+                    <p className="font-bold text-black">(___________________________)</p>
+                    <p className="mt-1">ลายเซ็นผู้ลงทะเบียนพนักงานรับคืนสลิป</p>
+                    <p className="text-[10px] text-gray-400">ข้าพเจ้าตรวจสอบความสมบูรณ์แล้วถูกต้อง</p>
+                  </div>
+                </div>
+
+                {/* Page count indicator */}
+                <div className="text-center text-[9px] text-gray-400 mt-6 pt-3 border-t border-gray-150">
+                  แผ่นที่ {idx + 1} จากทั้งหมด {filteredPayroll.length} • ออกสลิปพนักงานแบบเป็นรายแผ่น A4 แนวตั้งเรียบร้อยสมบูรณ์
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CORE MATRIX LIST PRINT OVERLAY */}
+      {printMode === 'core_matrix' && (
+        <div id="print-backdrop-container" className="fixed inset-0 bg-[#0c0d0e] z-50 overflow-y-auto flex flex-col items-center p-6 space-y-6">
+          {/* Top Control panel */}
+          <div className="bg-[#181a1c]/95 border border-white/10 p-4 rounded shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between w-full max-w-6xl gap-4 sticky top-0 z-50 print-hidden">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded bg-[#10b981]/10 flex items-center justify-center text-[#10b981]">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-extrabold text-sm text-white">รายงานสรุปบัญชีทำจ่ายพนักงานระดับบุคคล (Payroll Core Matrix A4)</h3>
+                <p className="text-xs text-gray-400">รอบบัญชี: {startDate} ถึง {endDate} • พนักงานที่ร่วมคำนวณ {filteredPayroll.length} คน</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => window.print()}
+                className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+              >
+                <Printer className="w-4 h-4" />
+                สั่งพิมพ์รายงานสรุป / PDF
+              </button>
+              <button
+                onClick={() => setPrintMode(null)}
+                className="py-2 px-4 bg-zinc-850 hover:bg-zinc-800 text-gray-300 text-xs font-bold rounded cursor-pointer transition-colors border border-white/5"
+              >
+                ย้อนกลับ / ปิดหน้านี้
+              </button>
+            </div>
+          </div>
+
+          {/* Core Matrix Report Sheet staged page */}
+          <div id="print-root-content" className="w-full flex justify-center pb-20">
+            <div className="bg-white text-black p-10 shadow-2xl border border-gray-350 rounded-sm w-full max-w-[297mm] font-sans text-left">
+              {/* Header */}
+              <div className="text-center space-y-1.5 pb-5 border-b-2 border-slate-900 mb-6">
+                <h3 className="text-lg font-bold font-serif uppercase tracking-wider text-black">รายงานสรุปแผ่นจ่ายเงินเดือนและโอทีระดับบุคคล (Payroll Core Matrix)</h3>
+                <p className="text-xs text-gray-650 font-bold uppercase tracking-wide">IKM TESTING (THAILAND) CO., LTD.</p>
+                <p className="text-xs text-gray-550 font-medium">
+                  ประจำรอบตัดจ่ายช่วงวันที่: <span className="font-bold underline text-black">{startDate}</span> ถึงวันที่ <span className="font-bold underline text-black">{endDate}</span>
+                </p>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[11px] border-collapse border border-slate-400 text-black">
+                  <thead className="bg-slate-100 font-bold">
+                    <tr className="border-b border-slate-500">
+                      <th className="p-2 border border-slate-400 text-center text-black">รหัส</th>
+                      <th className="p-2 border border-slate-400 text-black">ชื่อพนักงาน</th>
+                      <th className="p-2 border border-slate-400 text-center text-black">ประเภทจ้าง</th>
+                      <th className="p-2 border border-slate-400 text-center text-black">วันทำงาน</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">ค่าจ้างมูลฐาน</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">สะสม OT</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">เงินเพิ่มพิเศษ</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">เงินหักอื่น ๆ</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">ภาษี หัก 3%</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">หักประกันสังคม (SSO)</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">หักกยศ.</th>
+                      <th className="p-2 border border-slate-400 text-right text-black">รวมจ่ายสุทธิ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-355 font-medium">
+                    {filteredPayroll.map((p) => (
+                      <tr key={p.id} className="border-b border-slate-300 hover:bg-slate-50">
+                        <td className="p-2 border border-slate-300 text-center font-mono text-gray-600">{p.id}</td>
+                        <td className="p-2 border border-slate-300 font-bold text-black">{p.name}</td>
+                        <td className="p-2 border border-slate-300 text-center">{p.scheduleType}</td>
+                        <td className="p-2 border border-slate-300 text-center font-mono">{p.daysWorked} วัน</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{p.baseNormalPay.toLocaleString()}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{(p.ot15Wage + p.ot20Wage + p.ot30Wage).toLocaleString()}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{p.extraAllowance.toLocaleString()}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{p.otherDeduction.toLocaleString()}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{p.tax.toLocaleString()}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{p.sso.toLocaleString()}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono">{p.studentLoan > 0 ? p.studentLoan.toLocaleString() : '—'}</td>
+                        <td className="p-2 border border-slate-300 text-right font-mono font-bold text-emerald-800">{p.netIncome.toLocaleString()} ฿</td>
+                      </tr>
+                    ))}
+                    
+                    {/* Totals row */}
+                    <tr className="bg-slate-100 font-extrabold border-t-2 border-slate-900 border-b border-slate-400">
+                      <td colSpan={3} className="p-2 border border-slate-400 text-center text-black">ยอดรวมสะสมสุทธิทั้งหมด (Grand Totals)</td>
+                      <td className="p-2 border border-slate-400 text-center font-mono text-black">
+                        {filteredPayroll.reduce((sum, item) => sum + item.daysWorked, 0)} วัน
+                      </td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">{totals.normalPay.toLocaleString()}</td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">{(totals.ot15 + totals.ot20 + totals.ot30).toLocaleString()}</td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">
+                        {filteredPayroll.reduce((sum, item) => sum + item.extraAllowance, 0).toLocaleString()}
+                      </td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">
+                        {filteredPayroll.reduce((sum, item) => sum + item.otherDeduction, 0).toLocaleString()}
+                      </td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">{totals.tax.toLocaleString()}</td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">{totals.sso.toLocaleString()}</td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-black">{totals.studentLoan.toLocaleString()}</td>
+                      <td className="p-2 border border-slate-400 text-right font-mono text-emerald-750 font-black text-black">{totals.net.toLocaleString()} ฿</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Signature area */}
+              <div className="grid grid-cols-3 gap-8 pt-12 text-center text-xs text-gray-750 mt-12 border-t border-dashed border-gray-300">
+                <div>
+                  <div className="h-10"></div>
+                  <p className="font-bold text-black">( _______________________________ )</p>
+                  <p className="mt-1 font-semibold text-black">ผู้จัดทำสารและแผ่นเบิกจ่าย / Account Clerk</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">วันที่พิมพ์ใบสรุป: {new Date().toLocaleDateString('th-TH')}</p>
+                </div>
+                <div>
+                  <div className="h-10"></div>
+                  <p className="font-bold text-black">( _______________________________ )</p>
+                  <p className="mt-1 font-semibold text-black">ผู้รับผิดชอบการตรวจสอบ / Human Resources Manager</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">สถานะใบจ่าย: ผ่านหลักเกณฑ์เรียบร้อย</p>
+                </div>
+                <div>
+                  <div className="h-10"></div>
+                  <p className="font-bold text-black">( _______________________________ )</p>
+                  <p className="mt-1 font-semibold text-black">ผู้อนุมัติดำเนินการจ่ายเงินเดือน / Managing Director</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">บริษัท ไอเคเอ็ม เทสติ้ง (ประเทศไทย) จำกัด</p>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="text-center text-[10px] text-gray-400 mt-12 pt-3 border-t border-gray-150">
+                รายงานความปลอดภัยทางการเงินของพนักงาน - เอกสารใช้เฉพาะภายในระบบงานสารสนเทศ (Confidential Paper)
+              </div>
             </div>
           </div>
         </div>

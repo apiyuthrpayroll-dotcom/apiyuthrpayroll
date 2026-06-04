@@ -118,6 +118,10 @@ export function calculateEntryOT(
   let ot20Hours = 0;
   let ot30Hours = 0;
 
+  const isDailyWorker =
+    workScheduleType === 'daily_worker' ||
+    (position && position.toLowerCase().includes('daily'));
+
   // 2. Holiday or Sunday calculation rules (bypassed if offshore)
   if ((isPubHoliday || isSunday) && !isOffshore) {
     // Normal hours are 0 for holidays, but they do work and get holiday pay rates.
@@ -153,27 +157,26 @@ export function calculateEntryOT(
   } 
   // 3. Saturday calculation rules (bypassed if offshore)
   else if (isSaturday && !isOffshore) {
-    const isDailyWorker =
-      workScheduleType === 'daily_worker' ||
-      (position && position.toLowerCase().includes('daily'));
-
     if (isDailyWorker) {
-      // "พนักงาน Daily Worker ทำงาน จันทร์ - เสาร์ ปกติ หลัง 8 ชั่วโมงไป คิดโอทีตามกฎหมาย"
+      // "พนักงานที่มีตำแหน่ง Daily Worker ปรับวันทำจันทร์ - เสาร์ เป็นวันทำงานปกติ"
+      // Normal hours are up to 8.0, and after-hours are OT 1.5.
       const mainWorkHours = actualWorkHours;
       normalHours = Math.min(8.0, mainWorkHours);
       ot15Hours = Math.max(0, mainWorkHours - 8.0);
 
+      // Keyed lunch break worked (Lunch OT Flag = 1):
+      // Calculated as 1.0 hour of OT 1.5.
       if (addedLunchOT > 0) {
         ot15Hours += addedLunchOT;
       }
     } else {
-      // "กลุ่ม Technician, Officer, Manager, Developer, Staff ทำงาน จันทร์ - ศุกร์ วันเสาร์ทำงานครึ่งวัน 08:00-12:00 หลัง 4 ชั่วโมงไป คิดโอทีตามกฎหมาย"
+      // "ส่วนตำแหน่งอื่นๆ วันเสาร์ 08:00-12:00 นับ 4 ชั่วโมง หลังจาก 4 ชั่วโมง คือโอที 1.5"
       const mainWorkHours = actualWorkHours;
       normalHours = Math.min(4.0, mainWorkHours);
       ot15Hours = Math.max(0, mainWorkHours - 4.0);
 
       // If Lunch OT (คีย์ 1): Worked during break (which on Saturday is 12:00-13:00).
-      // This adds 1.0 hour to OT 1.5 since it is after the 12:00 limit.
+      // This adds 1.0 hour to OT 1.5.
       if (addedLunchOT > 0) {
         ot15Hours += addedLunchOT;
       }

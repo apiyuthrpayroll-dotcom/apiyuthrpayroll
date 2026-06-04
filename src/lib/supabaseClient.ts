@@ -22,6 +22,24 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const resolvedTableNames: Record<string, string> = {};
 
 /**
+ * Checks if a Supabase dynamic error message indicates that the targeted table
+ * has not yet been defined on the remote Supabase instance.
+ */
+function isTableOrSchemaMissing(msg: string): boolean {
+  if (!msg) return false;
+  const lowercaseMsg = msg.toLowerCase();
+  return (
+    lowercaseMsg.includes('invalid path') ||
+    lowercaseMsg.includes('does not exist') ||
+    lowercaseMsg.includes('not found') ||
+    lowercaseMsg.includes('schema cache') ||
+    lowercaseMsg.includes('42p01') ||
+    lowercaseMsg.includes('pgrst116') ||
+    lowercaseMsg.includes('pgrst205')
+  );
+}
+
+/**
  * Resiliently probes Supabase to see which table name candidate is available (case-insensitive fallback).
  * Caches the resolved table name for all subsequent database requests to run instantly.
  */
@@ -176,7 +194,12 @@ export async function dbUpsertEmployee(emp: any) {
     if (error) throw error;
     return true;
   } catch (err: any) {
-    console.error('❌ Supabase EmployeeRates write error:', err.message);
+    const errMsg = err?.message || '';
+    if (isTableOrSchemaMissing(errMsg)) {
+      console.warn('⚠️ Supabase EmployeeRates warning (schema not loaded or table not created yet):', errMsg);
+    } else {
+      console.error('❌ Supabase EmployeeRates write error:', errMsg);
+    }
     return false;
   }
 }
@@ -195,7 +218,12 @@ export async function dbDeleteEmployee(id: string) {
     if (error) throw error;
     return true;
   } catch (err: any) {
-    console.error('❌ Supabase Delete Employee Error:', err.message);
+    const errMsg = err?.message || '';
+    if (isTableOrSchemaMissing(errMsg)) {
+      console.warn('⚠️ Supabase EmployeeRates warning (schema not loaded or table not created yet):', errMsg);
+    } else {
+      console.error('❌ Supabase Delete Employee Error:', errMsg);
+    }
     return false;
   }
 }
@@ -276,7 +304,12 @@ export async function dbUpsertTimesheet(entry: any) {
     if (error) throw error;
     return true;
   } catch (err: any) {
-    console.error('❌ Supabase TIMESHEET write error:', err.message);
+    const errMsg = err?.message || '';
+    if (isTableOrSchemaMissing(errMsg)) {
+      console.warn('⚠️ Supabase TIMESHEET warning (schema not loaded or table not created yet):', errMsg);
+    } else {
+      console.error('❌ Supabase TIMESHEET write error:', errMsg);
+    }
     return false;
   }
 }
@@ -296,7 +329,12 @@ export async function dbDeleteTimesheet(id: string) {
     return true;
   } catch (err: any) {
     // If not UUID, eq ID might fail, so check fallback
-    console.error('❌ Supabase TIMESHEET delete warning:', err.message);
+    const errMsg = err?.message || '';
+    if (isTableOrSchemaMissing(errMsg)) {
+      console.warn('⚠️ Supabase TIMESHEET warning (schema not loaded or table not created yet):', errMsg);
+    } else {
+      console.error('❌ Supabase TIMESHEET delete error:', errMsg);
+    }
     return false;
   }
 }
@@ -340,7 +378,12 @@ export async function dbBulkInsertTimesheets(entries: any[]) {
     if (error) throw error;
     return true;
   } catch (err: any) {
-    console.error('❌ Supabase TIMESHEET Bulk Insert Error:', err.message);
+    const errMsg = err?.message || '';
+    if (isTableOrSchemaMissing(errMsg)) {
+      console.warn('⚠️ Supabase TIMESHEET warning (schema not loaded or table not created yet):', errMsg);
+    } else {
+      console.error('❌ Supabase TIMESHEET Bulk Insert Error:', errMsg);
+    }
     return false;
   }
 }
@@ -359,7 +402,12 @@ export async function dbClearAllTimesheets() {
     if (error) throw error;
     return true;
   } catch (err: any) {
-    console.error('❌ Supabase TIMESHEET clear error:', err.message);
+    const errMsg = err?.message || '';
+    if (isTableOrSchemaMissing(errMsg)) {
+      console.warn('⚠️ Supabase TIMESHEET warning (schema not loaded or table not created yet):', errMsg);
+    } else {
+      console.error('❌ Supabase TIMESHEET clear error:', errMsg);
+    }
     return false;
   }
 }
