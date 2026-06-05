@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Employee, TimesheetEntry, SystemSettings, Holiday } from '../types';
 import { 
   Users, Calendar, Clock, Filter, Printer, Download, Save,
@@ -1455,7 +1456,7 @@ export default function IndividualReport({
                 className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                พิมพ์ของคนที่เลือก (Print Selected)
+                ส่งออก PDF / พิมพ์คนนี้ (Export Selected PDF)
               </button>
 
               <button
@@ -1464,7 +1465,7 @@ export default function IndividualReport({
                 className="flex items-center gap-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white font-extrabold text-xs py-2 px-4 rounded-sm transition-all border border-purple-500/20 cursor-pointer shadow-md"
               >
                 <Printer className="w-4 h-4" />
-                พิมพ์ของทุกคน (Batch print A4ทุกคน)
+                ส่งออก PDF / พิมพ์ทุกคน (Batch Export PDF)
               </button>
 
               <button
@@ -2181,7 +2182,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                 className="flex items-center gap-1 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs py-2 px-4 rounded-sm transition-all border border-white/15 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                พิมพ์หน้านี้ (Print PDF)
+                ส่งออก PDF / พิมพ์หน้านี้ (Export PDF / Print Page)
               </button>
 
               <button
@@ -2570,53 +2571,47 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
       )}
 
       {/* 4. HIGH FIDELITY MULTI-EMPLOYEE BATCH PRINT / SINGLE VIEW PORTRAIT OVERLAY FOR A4 PRINTING */}
-      <div id="print-backdrop-container" className="hidden print:block bg-white text-black p-0 m-0 w-full">
-        {/* Style tag to enforce perfect A4 Vertical/Portrait format rules when printing */}
-        <style dangerouslySetInnerHTML={{ __html: `
-          @media print {
-            @page {
-              size: A4 portrait;
-              margin: 8mm 8mm 8mm 8mm !important;
-            }
-            body {
-              background: white !important;
-              color: text-black !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            #root > *:not(#print-backdrop-container),
-            header,
-            footer,
-            nav,
-            aside,
-            button,
-            .print-hidden,
-            .no-print {
-              display: none !important;
-              visibility: hidden !important;
-            }
-            #print-backdrop-container,
-            #print-backdrop-container * {
-              visibility: visible !important;
-            }
-            #print-backdrop-container {
-              display: block !important;
-              position: absolute !important;
-              left: 0 !important;
-              top: 0 !important;
-              width: 100% !important;
-              background: white !important;
-              color: black !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            @keyframes fade-in {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-            .print-page-break {
-              page-break-after: always !important;
-              break-after: page !important;
+      {createPortal(
+        <div id="print-backdrop-container" className="hidden print:block bg-white text-black p-0 m-0 w-full">
+          {/* Style tag to enforce perfect A4 Vertical/Portrait format rules when printing */}
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page {
+                size: A4 portrait;
+                margin: 8mm 8mm 8mm 8mm !important;
+              }
+              body {
+                background: white !important;
+                color: text-black !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              #root {
+                display: none !important;
+                visibility: hidden !important;
+              }
+              #print-backdrop-container,
+              #print-backdrop-container * {
+                visibility: visible !important;
+              }
+              #print-backdrop-container {
+                display: block !important;
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                background: white !important;
+                color: black !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              @keyframes fade-in {
+                from { opacity: 0; }
+                to { opacity: 1; }
+              }
+              .print-page-break {
+                page-break-after: always !important;
+                break-after: page !important;
               display: block !important;
               margin: 0 !important;
               padding: 0 !important;
@@ -3074,7 +3069,9 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
             </div>
           );
         })}
-      </div>
+      </div>,
+      document.body
+    )}
 
     </div>
   );
