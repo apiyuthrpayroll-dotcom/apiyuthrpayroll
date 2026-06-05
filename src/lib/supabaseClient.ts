@@ -3,23 +3,89 @@ import { createClient } from '@supabase/supabase-js';
 // Load values from environment or fallback to user's explicit credential settings
 const metaEnv = (import.meta as any).env || {};
 
-// Robustly clean up VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to avoid trailing slashes, spaces, or surrounding quotes
-const cleanUrl = (metaEnv.VITE_SUPABASE_URL || 'https://mtwnkkhcgopbrsoztykv.supabase.co')
-  .trim()
-  .replace(/^["']|["']$/g, '')
-  .trim();
+// Function to clean Supabase URL from accidental rest trails (e.g. /rest/v1/)
+function cleanSupabaseUrl(rawUrl: string): string {
+  let url = rawUrl.trim().replace(/^["']|["']$/g, '').trim();
+  // Strip common subpaths pasted by users from API settings (e.g., /rest/v1)
+  url = url.replace(/\/rest\/v1\/?$/, '');
+  url = url.replace(/\/+$/, '');
+  return url;
+}
 
-const supabaseUrl = cleanUrl.endsWith('/') ? cleanUrl.replace(/\/+$/, '') : cleanUrl;
+// Function to resolve current active Supabase URL and Key
+export function getSupabaseCredentials() {
+  const localUrl = localStorage.getItem('thai_ot_supabase_url');
+  const localKey = localStorage.getItem('thai_ot_supabase_anon_key');
+  
+  const rawUrl = localUrl || metaEnv.VITE_SUPABASE_URL || 'https://mtwnkkhcgopbrsoztykv.supabase.co';
+  const url = cleanSupabaseUrl(rawUrl);
+  
+  const key = (localKey || metaEnv.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10d25ra2hjZ29wYnJzb3p0eWt2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MzEzMDEsImV4cCI6MjA5NDIwNzMwMX0.i3ifZMuKpElWKKhHWcgRSrhlsgXAtATN7XSQorsiu5g')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+    
+  return { url, key };
+}
 
-const supabaseAnonKey = (metaEnv.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10d25ra2hjZ29wYnJzb3p0eWt2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MzEzMDEsImV4cCI6MjA5NDIwNzMwMX0.i3ifZMuKpElWKKhHWcgRSrhlsgXAtATN7XSQorsiu5g')
-  .trim()
-  .replace(/^["']|["']$/g, '')
-  .trim();
+const creds = getSupabaseCredentials();
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export let supabase = createClient(creds.url, creds.key);
 
 // Cache of resolved table names to avoid probing on every single query
 const resolvedTableNames: Record<string, string> = {};
+
+// Function to update/re-create the client dynamically
+export function updateSupabaseClient(customUrl: string, customKey: string) {
+  const url = cleanSupabaseUrl(customUrl);
+  const key = customKey.trim().replace(/^["']|["']$/g, '').trim();
+  
+  localStorage.setItem('thai_ot_supabase_url', url);
+  localStorage.setItem('thai_ot_supabase_anon_key', key);
+  
+  // Re-create client
+  supabase = createClient(url, key);
+  
+  // Clear cached table names so they are re-checked on next fetch
+  Object.keys(resolvedTableNames).forEach(k => delete resolvedTableNames[k]);
+}
+
+/**
+ * Verifies if required tables exist in Supabase.
+ * Returns an object with table status.
+ */
+export async function dbCheckTablesStatus() {
+  const tables = {
+    EmployeeRates: false,
+    TIMESHEET: false,
+    RateCalulate: false,
+    'Sumary-Mount': false,
+    IndividualSupplements: false
+  };
+
+  const checkTable = async (name: string, fallbackNames: string[]) => {
+    try {
+      const candidates = [name, ...fallbackNames];
+      for (const cand of candidates) {
+        const { error } = await supabase.from(cand).select('*').limit(1);
+        if (!error || !isTableOrSchemaMissing(error.message)) {
+          return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  tables.EmployeeRates = await checkTable('EmployeeRates', ['employeerates', 'employee_rates']);
+  tables.TIMESHEET = await checkTable('TIMESHEET', ['timesheet', 'Timesheet']);
+  tables.RateCalulate = await checkTable('RateCalulate', ['ratecalulate', 'rate_calculate', 'RateCalculate']);
+  tables['Sumary-Mount'] = await checkTable('Sumary-Mount', ['sumary_mount', 'SummaryMonth', 'summary_month']);
+  tables.IndividualSupplements = await checkTable('IndividualSupplements', ['individual_supplements', 'individualsupplements', 'IndividualSupplements', 'supplements', 'supplements_individual']);
+
+  return tables;
+}
 
 /**
  * Checks if a Supabase dynamic error message indicates that the targeted table
@@ -373,7 +439,7 @@ export async function dbBulkInsertTimesheets(entries: any[]) {
 
     const { error } = await supabase
       .from(tableName)
-      .insert(dbPayloads);
+      .upsert(dbPayloads, { onConflict: 'ID' });
 
     if (error) throw error;
     return true;
@@ -496,8 +562,8 @@ export async function dbSaveSupplements(supplementsList: any[]) {
   if (!supplementsList || supplementsList.length === 0) {
     return true;
   }
+  const tableName = await getTableRef('IndividualSupplements', ['individual_supplements', 'individualsupplements', 'IndividualSupplements', 'supplements', 'supplements_individual']);
   try {
-    const tableName = await getTableRef('IndividualSupplements', ['individual_supplements', 'individualsupplements', 'IndividualSupplements', 'supplements', 'supplements_individual']);
     const { error } = await supabase
       .from(tableName)
       .upsert(supplementsList, { onConflict: 'ID' });
@@ -508,9 +574,41 @@ export async function dbSaveSupplements(supplementsList: any[]) {
     return true;
   } catch (err: any) {
     const errMsg = err?.message || '';
+    const lowercaseMsg = errMsg.toLowerCase();
+    
+    // Check if the error indicates a missing ConfineSpace or Incentive column
+    const isColumnMissingError = 
+      lowercaseMsg.includes('confinespace') || 
+      lowercaseMsg.includes('incentive') ||
+      lowercaseMsg.includes('schema cache') || 
+      err?.code === '42703' || 
+      err?.code === 'PGRST204';
+
+    if (isColumnMissingError) {
+      console.warn('⚠️ Supabase missing ConfineSpace/Incentive column error detected. Retrying with stripped payloads...', errMsg);
+      // Strip ConfineSpace and Incentive, keeping other standard columns
+      const strippedList = supplementsList.map(item => {
+        const { ConfineSpace, Incentive, ...rest } = item;
+        return rest;
+      });
+      
+      try {
+        const { error: retryError } = await supabase
+          .from(tableName)
+          .upsert(strippedList, { onConflict: 'ID' });
+          
+        if (retryError) throw retryError;
+        console.log('✓ Successfully saved supplements with simplified fallback (without ConfineSpace/Incentive)!');
+        return true;
+      } catch (retryErr: any) {
+        console.error('❌ Supabase fallback upsert error:', retryErr?.message || retryErr);
+        throw retryErr;
+      }
+    }
+
     const isTableErr = errMsg.includes('Invalid path') || 
-                       errMsg.toLowerCase().includes('not found') || 
-                       errMsg.toLowerCase().includes('does not exist');
+                       lowercaseMsg.includes('not found') || 
+                       lowercaseMsg.includes('does not exist');
     if (isTableErr) {
       console.warn('⚠️ Supabase IndividualSupplements warning (schema not loaded or table not created yet):', errMsg);
     } else {

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Employee, TimesheetEntry, SystemSettings, Holiday } from '../types';
 import { 
   Users, Calendar, Clock, Filter, Printer, Download, Save,
-  Search, FileSpreadsheet, ChevronRight, CheckCircle, Info, ArrowRight, UserCheck, RefreshCw, Plus, Check, Database
+  Search, FileSpreadsheet, ChevronRight, CheckCircle, Info, ArrowRight, UserCheck, RefreshCw, Plus, Check, Database, Trash2
 } from 'lucide-react';
 import { calculateEntryOT } from '../utils/calculator';
 import { dbFetchSupplements, dbSaveSupplements } from '../lib/supabaseClient';
@@ -222,9 +222,12 @@ export default function IndividualReport({
 
     const initialDrafts: Record<string, Partial<TimesheetEntry>> = {};
     renderedDates.forEach(dStr => {
-      const existing = filteredEntries.find(e => e.date === dStr);
-      if (existing) {
-        initialDrafts[dStr] = { ...existing };
+      const dayEntries = filteredEntries.filter(e => e.date === dStr);
+      if (dayEntries.length > 0) {
+        dayEntries.forEach((entry, idx) => {
+          const key = entry.id || `${dStr}_${idx}`;
+          initialDrafts[key] = { ...entry };
+        });
       } else {
         initialDrafts[dStr] = {
           id: `draft-${dStr}`,
@@ -312,22 +315,23 @@ export default function IndividualReport({
   }, [masterAggregate, masterSearch]);
 
   // Change specific cells on grid
-  const handleDraftChange = (date: string, field: keyof TimesheetEntry, value: any) => {
+  const handleDraftChange = (rowId: string, field: keyof TimesheetEntry, value: any) => {
     setDraftEntries(prev => {
-      const target = prev[date] || { date, employeeName: selectedEmpName };
+      const target = prev[rowId] || { id: rowId, employeeName: selectedEmpName };
       const updated = { ...target, [field]: value };
+      const dateStr = updated.date || rowId;
 
       // Make dynamic calculation of OT and normal hours instantly if working times or lunch flags change
       if (updated.timeIn && updated.timeOut) {
         const cal = calculateEntryOT(
-          date,
+          dateStr,
           updated.timeIn,
           updated.timeOut,
           Number(updated.lunchDeduct ?? 1),
           Number(updated.lunchOT ?? 0),
           activeEmployee?.isFlatRate || false,
           holidays,
-          projectInput,
+          updated.project || projectInput || 'workshop',
           activeEmployee?.workScheduleType,
           activeEmployee?.position
         );
@@ -342,13 +346,13 @@ export default function IndividualReport({
         updated.ot30Hours = 0;
       }
 
-      return { ...prev, [date]: updated };
+      return { ...prev, [rowId]: updated };
     });
   };
 
   // Change supplementary values (Perdiem, Advance, Job Bonus, RemarkOverride)
-  const handleSupplementChange = (date: string, field: keyof SupplementData, value: any) => {
-    const key = `${employeeCodeInput}_${date}`;
+  const handleSupplementChange = (suppKeyOrDate: string, field: keyof SupplementData, value: any) => {
+    const key = suppKeyOrDate.includes('_') ? suppKeyOrDate : `${employeeCodeInput}_${suppKeyOrDate}`;
     setSupplements(prev => {
       const existing = prev[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
       return {
@@ -359,11 +363,55 @@ export default function IndividualReport({
   };
 
   // Helper to click standard working hours shift (08:00 - 17:00, lunch deduct active)
-  const handlePresetStandardShift = (dStr: string) => {
-    handleDraftChange(dStr, 'timeIn', '08:00');
-    handleDraftChange(dStr, 'timeOut', '17:00');
-    handleDraftChange(dStr, 'lunchDeduct', 1);
-    handleDraftChange(dStr, 'lunchOT', 0);
+  const handlePresetStandardShift = (rowId: string) => {
+    handleDraftChange(rowId, 'timeIn', '08:00');
+    handleDraftChange(rowId, 'timeOut', '17:00');
+    handleDraftChange(rowId, 'lunchDeduct', 1);
+    handleDraftChange(rowId, 'lunchOT', 0);
+  };
+
+  // Helper to add separate secondary job/shift row for a date
+  const handleAddJobRow = (dStr: string) => {
+    const newId = `split-draft-${dStr}-${Date.now()}`;
+    setDraftEntries(prev => {
+      return {
+        ...prev,
+        [newId]: {
+          id: newId,
+          employeeName: selectedEmpName,
+          date: dStr,
+          project: projectInput || 'workshop',
+          timeIn: '',
+          timeOut: '',
+          lunchDeduct: 1,
+          lunchOT: 0,
+          flatRate: activeEmployee?.isFlatRate || false,
+          normalHours: 0,
+          ot15Hours: 0,
+          ot20Hours: 0,
+          ot30Hours: 0,
+          remark: '',
+          status: 'Pending'
+        }
+      };
+    });
+  };
+
+  // Helper to remove any extra job row
+  const handleRemoveJobRow = async (rowId: string) => {
+    if (!rowId.startsWith('draft-') && !rowId.startsWith('split-draft-')) {
+      if (confirm('คุณต้องการลบรายงานตัวนี้ออกจากระบบถาวรใช่หรือไม่?')) {
+        await onDeleteEntry(rowId);
+      } else {
+        return;
+      }
+    }
+    
+    setDraftEntries(prev => {
+      const updated = { ...prev };
+      delete updated[rowId];
+      return updated;
+    });
   };
 
   // Bulk save current changes to Supabase
@@ -374,27 +422,32 @@ export default function IndividualReport({
 
     try {
       let savedCount = 0;
-      for (const dStr of renderedDates) {
-        const draft = draftEntries[dStr];
-        if (!draft) continue;
+      const draftList = Object.values(draftEntries) as Partial<TimesheetEntry>[];
+
+      for (const draft of draftList) {
+        if (!draft || !draft.date) continue;
+        const dStr = draft.date;
 
         // Skip saving completely blank columns unless the entry already existed in database
         const hasTimeReg = draft.timeIn && draft.timeOut;
-        const existsInDB = filteredEntries.some(e => e.date === dStr);
+        const isDraftPlaceholder = draft.id?.startsWith('draft-') || draft.id?.startsWith('split-draft-');
 
         if (hasTimeReg) {
-          if (existsInDB) {
-            const original = filteredEntries.find(e => e.date === dStr);
+          if (!isDraftPlaceholder) {
+            // Find existing original entry
+            const original = filteredEntries.find(e => e.id === draft.id);
             if (original && (
               original.timeIn !== draft.timeIn ||
               original.timeOut !== draft.timeOut ||
               original.lunchDeduct !== draft.lunchDeduct ||
               original.lunchOT !== draft.lunchOT ||
+              original.project !== draft.project ||
               original.remark !== draft.remark
             )) {
               await onUpdateEntry(original.id, {
                 timeIn: draft.timeIn,
                 timeOut: draft.timeOut,
+                project: draft.project,
                 lunchDeduct: draft.lunchDeduct,
                 lunchOT: draft.lunchOT,
                 normalHours: draft.normalHours,
@@ -408,10 +461,10 @@ export default function IndividualReport({
           } else {
             // Add new TimesheetEntry
             const newEntry: TimesheetEntry = {
-              id: `ID-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              id: `ID-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
               employeeName: selectedEmpName,
               date: dStr,
-              project: projectInput || 'workshop',
+              project: draft.project || projectInput || 'workshop',
               timeIn: draft.timeIn || '08:00',
               timeOut: draft.timeOut || '17:00',
               lunchDeduct: Number(draft.lunchDeduct ?? 1),
@@ -429,13 +482,10 @@ export default function IndividualReport({
             await onAddEntry(newEntry);
             savedCount++;
           }
-        } else if (existsInDB) {
+        } else if (!isDraftPlaceholder) {
           // If hours were completely wiped out, remove entry
-          const original = filteredEntries.find(e => e.date === dStr);
-          if (original) {
-            await onDeleteEntry(original.id);
-            savedCount++;
-          }
+          await onDeleteEntry(draft.id!);
+          savedCount++;
         }
       }
 
@@ -443,15 +493,15 @@ export default function IndividualReport({
       const supplementPayloads: any[] = [];
       const empId = employeeCodeInput || activeEmployee?.id || '';
       if (empId && activeEmployee) {
-        renderedDates.forEach(dStr => {
-          const key = `${empId}_${dStr}`;
-          const supp = supplements[key];
-          if (supp) {
+        Object.entries(supplements).forEach(([key, val]) => {
+          const supp = val as SupplementData;
+          const parts = key.split('_');
+          if (parts[0] === empId && parts[1] && renderedDates.includes(parts[1])) {
             supplementPayloads.push({
               ID: key,
               EmployeeID: empId,
               EmployeeName: activeEmployee.employeeName,
-              Date: dStr,
+              Date: parts[1],
               Perdiem: Number(supp.perdiem || 0),
               Advance: Number(supp.advance || 0),
               JobBonus: Number(supp.jobBonus || 0),
@@ -518,15 +568,15 @@ export default function IndividualReport({
 
     try {
       const payloads: any[] = [];
-      renderedDates.forEach(dStr => {
-        const key = `${empId}_${dStr}`;
-        const supp = supplements[key];
-        if (supp) {
+      Object.entries(supplements).forEach(([key, val]) => {
+        const supp = val as SupplementData;
+        const parts = key.split('_');
+        if (parts[0] === empId && parts[1] && renderedDates.includes(parts[1])) {
           payloads.push({
             ID: key,
             EmployeeID: empId,
             EmployeeName: activeEmployee.employeeName,
-            Date: dStr,
+            Date: parts[1],
             Perdiem: Number(supp.perdiem || 0),
             Advance: Number(supp.advance || 0),
             JobBonus: Number(supp.jobBonus || 0),
@@ -583,6 +633,56 @@ export default function IndividualReport({
     }
   };
 
+  // List of all displayed rows in the spreadsheet tables
+  const tableRows = useMemo(() => {
+    const list: { draft: any; rowId: string; dStr: string; suppKey: string; isMulti: boolean }[] = [];
+    renderedDates.forEach(dStr => {
+      const dayDrafts = (Object.values(draftEntries) as Partial<TimesheetEntry>[])
+        .filter(e => e.date === dStr)
+        .sort((a, b) => (a.timeIn || '08:00').localeCompare(b.timeIn || '08:00'));
+
+      if (dayDrafts.length === 0) {
+        list.push({
+          draft: {
+            id: `draft-${dStr}`,
+            employeeName: selectedEmpName,
+            date: dStr,
+            project: projectInput || 'workshop',
+            timeIn: '',
+            timeOut: '',
+            lunchDeduct: 1,
+            lunchOT: 0,
+            flatRate: activeEmployee?.isFlatRate || false,
+            normalHours: 0,
+            ot15Hours: 0,
+            ot20Hours: 0,
+            ot30Hours: 0,
+            remark: '',
+            status: 'Pending'
+          },
+          rowId: `draft-${dStr}`,
+          dStr,
+          suppKey: `${employeeCodeInput}_${dStr}_draft-${dStr}`,
+          isMulti: false
+        });
+      } else {
+        const isMulti = dayDrafts.length > 1;
+        dayDrafts.forEach(draft => {
+          const rowId = draft.id || dStr;
+          const suppKey = `${employeeCodeInput}_${dStr}_${rowId}`;
+          list.push({
+            draft,
+            rowId,
+            dStr,
+            suppKey,
+            isMulti
+          });
+        });
+      }
+    });
+    return list;
+  }, [renderedDates, draftEntries, employeeCodeInput, projectInput, activeEmployee, selectedEmpName]);
+
   // Summary Metrics matching under-table blocks on the image
   const computedSheetStats = useMemo(() => {
     let daysOnDuty = 0;
@@ -595,33 +695,41 @@ export default function IndividualReport({
     let ot20Sum = 0;
     let ot30Sum = 0;
 
-    renderedDates.forEach(dStr => {
-      const draft = draftEntries[dStr];
-      const key = `${employeeCodeInput}_${dStr}`;
-      const supp = supplements[key];
+    const workedDates = new Set<string>();
 
+    tableRows.forEach(row => {
+      const { draft, dStr } = row;
       const hasWork = draft && draft.timeIn && draft.timeOut;
-      const isSatOrSun = new Date(dStr).getDay() === 0 || new Date(dStr).getDay() === 6;
 
       if (hasWork) {
-        daysWorkedVal++;
+        workedDates.add(dStr);
         hoursWorkedVal += (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
         
         ot15Sum += draft.ot15Hours || 0;
         ot20Sum += draft.ot20Hours || 0;
         ot30Sum += draft.ot30Hours || 0;
       }
+    });
 
-      // Check leave
-      const lowerRemark = ((draft?.remark || '') + ' ' + (supp?.remarkOverride || '')).toLowerCase();
-      if (lowerRemark.includes('leave') || lowerRemark.includes('ลา') || lowerRemark.includes('annual')) {
+    renderedDates.forEach(dStr => {
+      const isSatOrSun = new Date(dStr).getDay() === 0 || new Date(dStr).getDay() === 6;
+      const dayRows = tableRows.filter(r => r.dStr === dStr);
+      const hasWorkOnDay = dayRows.some(r => r.draft && r.draft.timeIn && r.draft.timeOut);
+      
+      const hasLeaveRemark = dayRows.some(r => {
+        const suppObj = supplements[r.suppKey] || supplements[`${employeeCodeInput}_${r.dStr}`];
+        const lowerRemark = ((r.draft?.remark || '') + ' ' + (suppObj?.remarkOverride || '')).toLowerCase();
+        return lowerRemark.includes('leave') || lowerRemark.includes('ลา') || lowerRemark.includes('annual');
+      });
+
+      if (hasLeaveRemark) {
         leavesCount++;
-      } else if (isSatOrSun && !hasWork) {
-        // Weekend off
+      } else if (isSatOrSun && !hasWorkOnDay) {
         leavesCount++;
       }
     });
 
+    daysWorkedVal = workedDates.size;
     const otValueTotal = (ot15Sum * 1.5 + ot20Sum * 2.0 + ot30Sum * 3.0) * hourlyRate;
 
     return {
@@ -633,7 +741,7 @@ export default function IndividualReport({
       totalDayOffOrLeaves: leavesCount,
       otValueTotal: Number(otValueTotal.toFixed(2))
     };
-  }, [renderedDates, draftEntries, supplements, employeeCodeInput, hourlyRate]);
+  }, [renderedDates, tableRows, supplements, hourlyRate]);
 
   // Compute Daily Wages breakdown statistics
   const computedWagesStats = useMemo(() => {
@@ -647,10 +755,9 @@ export default function IndividualReport({
 
     const isStaff = activeEmployee?.workScheduleType === 'staff';
 
-    renderedDates.forEach(dStr => {
-      const draft = draftEntries[dStr] || {};
-      const key = `${employeeCodeInput}_${dStr}`;
-      const supp = supplements[key] || { perdiem: undefined, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+    tableRows.forEach(row => {
+      const { draft, suppKey } = row;
+      const supp = supplements[suppKey] || supplements[`${employeeCodeInput}_${row.dStr}`] || { perdiem: undefined, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
 
       const normHrs = draft.normalHours || 0;
       const itemOt15 = draft.ot15Hours || 0;
@@ -703,20 +810,39 @@ export default function IndividualReport({
       grandPerdiem,
       grandWelfareTotal
     };
-  }, [renderedDates, draftEntries, supplements, employeeCodeInput, hourlyRate, activeEmployee, settings]);
+  }, [tableRows, supplements, hourlyRate, activeEmployee, settings]);
 
   // Helper to resolve timesheet entries for any employee
   const getEmployeeEntryForDate = (empName: string, dStr: string) => {
     if (empName.toLowerCase().trim() === selectedEmpName.toLowerCase().trim()) {
-      const draft = draftEntries[dStr];
+      const draft = (Object.values(draftEntries) as Partial<TimesheetEntry>[]).find(e => e.date === dStr);
       if (draft) return draft;
     }
     
-    const existing = entries.find(e => {
+    const dayEntries = entries.filter(e => {
       return e.employeeName.toLowerCase().trim() === empName.toLowerCase().trim() && e.date === dStr;
     });
     
-    if (existing) return existing;
+    if (dayEntries.length > 0) {
+      if (dayEntries.length === 1) return dayEntries[0];
+      return {
+        id: `agg-${empName}-${dStr}`,
+        employeeName: empName,
+        date: dStr,
+        project: Array.from(new Set(dayEntries.map(e => e.project).filter(Boolean))).join(', '),
+        timeIn: dayEntries.map(e => `${e.timeIn || '08:00'}-${e.timeOut || '17:00'}`).join(', '),
+        timeOut: '',
+        lunchDeduct: dayEntries[0].lunchDeduct,
+        lunchOT: dayEntries[0].lunchOT,
+        flatRate: false,
+        normalHours: dayEntries.reduce((sum, e) => sum + (e.normalHours || 0), 0),
+        ot15Hours: dayEntries.reduce((sum, e) => sum + (e.ot15Hours || 0), 0),
+        ot20Hours: dayEntries.reduce((sum, e) => sum + (e.ot20Hours || 0), 0),
+        ot30Hours: dayEntries.reduce((sum, e) => sum + (e.ot30Hours || 0), 0),
+        remark: Array.from(new Set(dayEntries.map(e => e.remark).filter(Boolean))).join('; '),
+        status: dayEntries.some(e => e.status === 'Pending') ? 'Pending' : 'Approved'
+      };
+    }
     
     return {
       id: `temp-${empName}-${dStr}`,
@@ -761,24 +887,32 @@ export default function IndividualReport({
     let ot30Sum = 0;
 
     renderedDates.forEach(dStr => {
-      const draft = getEmployeeEntryForDate(emp.employeeName, dStr);
-      const key = `${emp.id}_${dStr}`;
-      const supp = supplements[key];
+      // Find all entries for this date
+      const dayDrafts = ((emp.employeeName.toLowerCase().trim() === selectedEmpName.toLowerCase().trim()
+        ? Object.values(draftEntries)
+        : entries
+      ) as Partial<TimesheetEntry>[]).filter(e => e && e.employeeName && e.employeeName.toLowerCase().trim() === emp.employeeName.toLowerCase().trim() && e.date === dStr);
 
-      const hasWork = draft && draft.timeIn && draft.timeOut;
+      const hasWork = dayDrafts.some(draft => draft.timeIn && draft.timeOut);
       const isSatOrSun = new Date(dStr).getDay() === 0 || new Date(dStr).getDay() === 6;
 
       if (hasWork) {
         daysWorkedVal++;
-        hoursWorkedVal += (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
-        
-        ot15Sum += draft.ot15Hours || 0;
-        ot20Sum += draft.ot20Hours || 0;
-        ot30Sum += draft.ot30Hours || 0;
+        dayDrafts.forEach(draft => {
+          if (draft.timeIn && draft.timeOut) {
+            hoursWorkedVal += (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
+            ot15Sum += draft.ot15Hours || 0;
+            ot20Sum += draft.ot20Hours || 0;
+            ot30Sum += draft.ot30Hours || 0;
+          }
+        });
       }
 
-      // Check leave
-      const lowerRemark = ((draft?.remark || '') + ' ' + (supp?.remarkOverride || '')).toLowerCase();
+      // Check leave on first entry or override
+      const firstDraft = dayDrafts[0];
+      const rowKey = firstDraft && firstDraft.id ? `${emp.id}_${dStr}_${firstDraft.id}` : `${emp.id}_${dStr}`;
+      const supp = supplements[rowKey] || supplements[`${emp.id}_${dStr}`];
+      const lowerRemark = (((firstDraft?.remark || '') + ' ' + (supp?.remarkOverride || '')).toLowerCase());
       if (lowerRemark.includes('leave') || lowerRemark.includes('ลา') || lowerRemark.includes('annual')) {
         leavesCount++;
       } else if (isSatOrSun && !hasWork) {
@@ -828,10 +962,9 @@ export default function IndividualReport({
       'Remark'
     ];
 
-    const rows = renderedDates.map(dStr => {
-      const draft = draftEntries[dStr] || {};
-      const key = `${employeeCodeInput}_${dStr}`;
-      const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+    const rows = tableRows.map(row => {
+      const { draft, suppKey, dStr } = row;
+      const supp = supplements[suppKey] || supplements[`${employeeCodeInput}_${dStr}`] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
       
       const dayName = new Date(dStr).toLocaleDateString('en-US', { weekday: 'long' });
       const dayNum = new Date(dStr).getDate();
@@ -900,10 +1033,9 @@ export default function IndividualReport({
       'Remark/หมายเหตุ'
     ];
 
-    const rows = renderedDates.map(dStr => {
-      const draft = draftEntries[dStr] || {};
-      const key = `${employeeCodeInput}_${dStr}`;
-      const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+    const rows = tableRows.map(row => {
+      const { draft, suppKey, dStr } = row;
+      const supp = supplements[suppKey] || supplements[`${employeeCodeInput}_${dStr}`] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
       
       const dayName = new Date(dStr).toLocaleDateString('en-US', { weekday: 'long' });
       const dayNum = new Date(dStr).getDate();
@@ -913,8 +1045,27 @@ export default function IndividualReport({
       const itemOt20 = draft.ot20Hours || 0;
       const itemOt30 = draft.ot30Hours || 0;
 
-      const normalPay = normHrs * hourlyRate;
-      const otPay = (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0) * hourlyRate;
+      // Day-specific rate determination
+      let localDayRate = activeEmployee?.workshopRate || 0;
+      const proj = (draft.project || '').toLowerCase().trim();
+      const isOffshore = proj.includes('offshore');
+      const isWfh = proj.includes('wfh') || proj.includes('home');
+      const isWorkshop = proj.includes('workshop');
+      const isOnsite = proj.includes('onsite') || (proj !== '' && !isWorkshop && !isOffshore && !isWfh);
+
+      if (isOnsite) {
+        localDayRate = activeEmployee?.onsiteRate || 0;
+      } else if (isOffshore) {
+        localDayRate = activeEmployee?.offshoreRate || 0;
+      } else if (isWfh) {
+        localDayRate = activeEmployee?.wfhRate || 0;
+      }
+
+      const isStaff = activeEmployee?.workScheduleType === 'staff';
+      const localHourlyRate = isStaff ? hourlyRate : Number((localDayRate / (settings.defaultWorkHours || 8)).toFixed(2));
+
+      const normalPay = normHrs * localHourlyRate;
+      const otPay = isOffshore ? 0 : (itemOt15 * 1.5 + itemOt20 * 2.0 + itemOt30 * 3.0) * localHourlyRate;
       const combinedWageOt = normalPay + otPay;
 
       const confineVal = Number(supp.confineSpace || 0);
@@ -1593,10 +1744,9 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                 {/* SPREADSHEET BODY */}
                 <tbody className="divide-y divide-slate-200">
-                  {renderedDates.map((dStr, idx) => {
-                    const draft = draftEntries[dStr] || {};
-                    const key = `${employeeCodeInput}_${dStr}`;
-                    const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+                  {tableRows.map((rowItem, idx) => {
+                    const { draft, rowId, dStr, suppKey, isMulti } = rowItem;
+                    const supp = supplements[suppKey] || supplements[`${employeeCodeInput}_${dStr}`] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
 
                     const dateObj = new Date(dStr);
                     const dayNum = dateObj.getDate();
@@ -1629,7 +1779,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       dayTextClass = 'text-purple-700 font-bold';
                     } else if (isSunday) {
                       rowBgClass = 'bg-[#ECECEC]/70 print:bg-[#ECECEC]/60'; // Gray
-                      dayTextClass = 'text-red-600 font-bold';
+                      dayTextClass = 'text-red-650 font-bold';
                     }
 
                     // Checks Leave style
@@ -1644,20 +1794,39 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                     // Total work hours
                     const workHoursSum = (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
 
+                    // Find how many rows belong to this dStr
+                    const dayRows = tableRows.filter(r => r.dStr === dStr);
+                    const isFirstRowOfDay = dayRows[0]?.rowId === rowId;
+
                     return (
                       <tr 
-                        key={dStr} 
+                        key={rowId} 
                         className={`divide-x divide-slate-200 text-center text-[11px] h-9 hover:bg-slate-50/50 print:hover:none ${rowBgClass}`}
                       >
                         {/* Day of Week */}
-                        <td className={`py-1 px-1.5 text-left truncate font-sans ${dayTextClass}`}>
-                          {dayOfWeekStr}
-                        </td>
+                        {isFirstRowOfDay ? (
+                          <td className={`py-1 px-1.5 text-left truncate font-sans ${dayTextClass}`} rowSpan={dayRows.length}>
+                            <div className="flex flex-col">
+                              <span>{dayOfWeekStr}</span>
+                              <button
+                                type="button"
+                                title="เพิ่มแถวกรอกงานโครงการที่สอง สำหรับวันนี้นะคะ (Add secondary work shift/job)"
+                                onClick={() => handleAddJobRow(dStr)}
+                                className="mt-1 flex items-center justify-center gap-0.5 self-start bg-sky-50 hover:bg-sky-100 text-sky-850 font-bold py-0.5 px-1 rounded-sm border border-sky-200 text-[8.5px] cursor-pointer print:hidden"
+                              >
+                                <Plus className="w-2 h-2" />
+                                <span>แทรกงาน</span>
+                              </button>
+                            </div>
+                          </td>
+                        ) : null}
 
                         {/* Date Number */}
-                        <td className="py-1 px-0.5 font-bold font-mono">
-                          {dayNum}
-                        </td>
+                        {isFirstRowOfDay ? (
+                          <td className="py-1 px-0.5 font-bold font-mono" rowSpan={dayRows.length}>
+                            {dayNum}
+                          </td>
+                        ) : null}
 
                         {/* Start Input */}
                         <td className="py-1 px-0.5">
@@ -1665,7 +1834,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="text"
                             placeholder="——"
                             value={draft.timeIn || ''}
-                            onChange={(e) => handleDraftChange(dStr, 'timeIn', e.target.value)}
+                            onChange={(e) => handleDraftChange(rowId, 'timeIn', e.target.value)}
                             className="w-full text-center p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono text-[11.5px] font-bold text-slate-800 print:border-b-0 print:p-0"
                           />
                         </td>
@@ -1676,21 +1845,21 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="text"
                             placeholder="——"
                             value={draft.timeOut || ''}
-                            onChange={(e) => handleDraftChange(dStr, 'timeOut', e.target.value)}
+                            onChange={(e) => handleDraftChange(rowId, 'timeOut', e.target.value)}
                             className="w-full text-center p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono text-[11.5px] font-bold text-slate-800 print:border-b-0 print:p-0"
                           />
                         </td>
 
                         {/* Calculated Hours Column */}
                         <td className="py-1 px-0.5 font-mono font-bold text-sky-700 bg-slate-50/20 text-[11.5px]">
-                          {draft.timeIn && draft.timeOut ? (
+                          {(draft.timeIn && draft.timeOut) ? (
                             <span>{workHoursSum.toFixed(1)}</span>
                           ) : (
                             <div className="flex items-center justify-center group">
                               <span className="text-slate-300 group-hover:hidden">—</span>
                               <button
                                 type="button"
-                                onClick={() => handlePresetStandardShift(dStr)}
+                                onClick={() => handlePresetStandardShift(rowId)}
                                 title="คีย์สลิปด่วน 8:00 - 17:00"
                                 className="hidden group-hover:inline-flex bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 font-bold px-1 rounded-sm text-[8px] cursor-pointer print:hidden"
                               >
@@ -1702,7 +1871,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                         {/* 1.0 Overtime Hours */}
                         <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-505">
-                          {draft.timeIn && draft.timeOut && itemOt20 > 0 ? (
+                          {(draft.timeIn && draft.timeOut) && itemOt20 > 0 ? (
                             <span>{itemOt20.toFixed(1)}</span>
                           ) : (
                             <span className="text-slate-300 font-normal">—</span>
@@ -1711,7 +1880,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                         {/* 1.5 Overtime Hours (Standard workday list) */}
                         <td className="py-1 px-0.5 font-mono text-center font-bold text-amber-700">
-                          {draft.timeIn && draft.timeOut && itemOt15 > 0 ? (
+                          {(draft.timeIn && draft.timeOut) && itemOt15 > 0 ? (
                             <span>{itemOt15.toFixed(1)}</span>
                           ) : (
                             <span className="text-slate-300 font-normal">—</span>
@@ -1720,7 +1889,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                         {/* 3.0 Overtime Hours */}
                         <td className="py-1 px-0.5 font-mono text-center font-bold text-red-650">
-                          {draft.timeIn && draft.timeOut && itemOt30 > 0 ? (
+                          {(draft.timeIn && draft.timeOut) && itemOt30 > 0 ? (
                             <span>{itemOt30.toFixed(1)}</span>
                           ) : (
                             <span className="text-slate-300 font-normal">—</span>
@@ -1728,7 +1897,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                         </td>
 
                         {/* Calculated Value Pay */}
-                        <td className="py-1 px-0.5 font-mono text-right font-bold text-slate-700 bg-slate-50/20 pr-1">
+                        <td className="py-1 px-0.5 font-mono text-right font-bold text-slate-705 bg-slate-50/20 pr-1">
                           {otWageEstimated > 0 ? (
                             <span>{otWageEstimated.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
                           ) : (
@@ -1742,7 +1911,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="number"
                             placeholder="0"
                             value={supp.perdiem || ''}
-                            onChange={(e) => handleSupplementChange(dStr, 'perdiem', parseFloat(e.target.value) || 0)}
+                            onChange={(e) => handleSupplementChange(suppKey, 'perdiem', parseFloat(e.target.value) || 0)}
                             className="w-full text-right py-1 px-1 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-slate-800 text-[11px] print:border-none print:p-0"
                           />
                         </td>
@@ -1753,7 +1922,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="number"
                             placeholder="0"
                             value={supp.advance || ''}
-                            onChange={(e) => handleSupplementChange(dStr, 'advance', parseFloat(e.target.value) || 0)}
+                            onChange={(e) => handleSupplementChange(suppKey, 'advance', parseFloat(e.target.value) || 0)}
                             className="w-full text-right py-1 px-1 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-slate-800 text-[11px] print:border-none print:p-0"
                           />
                         </td>
@@ -1764,20 +1933,32 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="number"
                             placeholder="0"
                             value={supp.jobBonus || ''}
-                            onChange={(e) => handleSupplementChange(dStr, 'jobBonus', parseFloat(e.target.value) || 0)}
+                            onChange={(e) => handleSupplementChange(suppKey, 'jobBonus', parseFloat(e.target.value) || 0)}
                             className="w-full text-right py-1 px-1 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-slate-800 text-[11px] print:border-none print:p-0"
                           />
                         </td>
 
                         {/* Remarks Input */}
                         <td className="py-0.5 px-1 text-left">
-                          <input
-                            type="text"
-                            placeholder="——"
-                            value={finalRemark}
-                            onChange={(e) => handleSupplementChange(dStr, 'remarkOverride', e.target.value)}
-                            className="w-full text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-305 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-600 text-[10px] italic truncate print:border-none print:p-0"
-                          />
+                          <div className="flex items-center gap-1.5 justify-between">
+                            <input
+                              type="text"
+                              placeholder="——"
+                              value={finalRemark}
+                              onChange={(e) => handleSupplementChange(suppKey, 'remarkOverride', e.target.value)}
+                              className="flex-1 text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-305 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-600 text-[10px] italic truncate print:border-none print:p-0"
+                            />
+                            {isMulti && (
+                              <button
+                                type="button"
+                                title="ลบรายการแทรกงานนี้ (Delete duplicate job row)"
+                                onClick={() => handleRemoveJobRow(rowId)}
+                                className="p-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-105 rounded-full transition-colors cursor-pointer print:hidden shrink-0"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2104,10 +2285,9 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                 </thead>
 
                 <tbody className="divide-y divide-slate-200">
-                  {renderedDates.map((dStr, idx) => {
-                    const draft = draftEntries[dStr] || {};
-                    const key = `${employeeCodeInput}_${dStr}`;
-                    const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+                  {tableRows.map((rowItem) => {
+                    const { draft, rowId, dStr, suppKey, isMulti } = rowItem;
+                    const supp = supplements[suppKey] || supplements[`${employeeCodeInput}_${dStr}`] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
 
                     const dateObj = new Date(dStr);
                     const dayNum = dateObj.getDate();
@@ -2179,20 +2359,27 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       rowBgClass = 'bg-[#FEEDD1]'; // Sand / Soft peach
                     }
 
+                    const dayRows = tableRows.filter(r => r.dStr === dStr);
+                    const isFirstRowOfDay = dayRows[0]?.rowId === rowId;
+
                     return (
                       <tr 
-                        key={dStr} 
+                        key={rowId} 
                         className={`divide-x divide-slate-200 text-center text-[11px] h-9 hover:bg-slate-50/50 print:hover:none ${rowBgClass}`}
                       >
                         {/* Day of Week */}
-                        <td className={`py-1 px-1.5 text-left font-sans text-[10.5px] ${dayTextClass}`}>
-                          {thaiDayName}
-                        </td>
+                        {isFirstRowOfDay ? (
+                          <td className={`py-1 px-1.5 text-left font-sans text-[10.5px] ${dayTextClass}`} rowSpan={dayRows.length}>
+                            {thaiDayName}
+                          </td>
+                        ) : null}
 
                         {/* Date Number */}
-                        <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-800">
-                          {dayNum}
-                        </td>
+                        {isFirstRowOfDay ? (
+                          <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-800" rowSpan={dayRows.length}>
+                            {dayNum}
+                          </td>
+                        ) : null}
 
                         {/* ค่าแรงทำงานวันปกติ */}
                         <td className="py-1 px-1 font-mono text-right text-sky-850 font-semibold pr-2">
@@ -2215,7 +2402,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="number"
                             placeholder="0"
                             value={supp.confineSpace || ''}
-                            onChange={(e) => handleSupplementChange(dStr, 'confineSpace', parseFloat(e.target.value) || 0)}
+                            onChange={(e) => handleSupplementChange(suppKey, 'confineSpace', parseFloat(e.target.value) || 0)}
                             className="w-full text-right py-1 px-1.5 bg-transparent border-0 border-b border-transparent hover:border-violet-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-violet-800 text-[11px] print:border-none print:p-0"
                           />
                         </td>
@@ -2226,7 +2413,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="number"
                             placeholder="0"
                             value={supp.incentive || ''}
-                            onChange={(e) => handleSupplementChange(dStr, 'incentive', parseFloat(e.target.value) || 0)}
+                            onChange={(e) => handleSupplementChange(suppKey, 'incentive', parseFloat(e.target.value) || 0)}
                             className="w-full text-right py-1 px-1.5 bg-transparent border-0 border-b border-transparent hover:border-pink-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-pink-750 text-[11px] print:border-none print:p-0"
                           />
                         </td>
@@ -2239,7 +2426,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             value={supp.perdiem !== undefined ? supp.perdiem : ''}
                             onChange={(e) => {
                               const v = e.target.value === '' ? undefined : (parseFloat(e.target.value) || 0);
-                              handleSupplementChange(dStr, 'perdiem', v);
+                              handleSupplementChange(suppKey, 'perdiem', v);
                             }}
                             className="w-full text-right py-1 px-1.5 bg-transparent border-0 border-b border-transparent hover:border-amber-300 focus:border-[#D4AF37] focus:outline-hidden font-mono font-bold text-amber-805 text-[11px] print:border-none print:p-0"
                           />
@@ -2256,7 +2443,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                             type="text"
                             placeholder="——"
                             value={finalRemark}
-                            onChange={(e) => handleSupplementChange(dStr, 'remarkOverride', e.target.value)}
+                            onChange={(e) => handleSupplementChange(suppKey, 'remarkOverride', e.target.value)}
                             className="w-full text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-350 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-700 text-[10px] italic truncate print:border-none print:p-0"
                           />
                         </td>
@@ -2363,7 +2550,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
               <div className="border border-slate-300 p-2.5 rounded bg-slate-50/50 flex flex-col justify-between h-[115px]">
                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">Employee Signature:</span>
                 <div className="flex flex-col items-center">
-                  <span className="text-slate-400 select-none pb-1 font-mono text-[9px] block mb-1">Underline Signature</span>
+                  <span className="text-slate-400 select-none pb-1 font-mono text-[9px]">Underline Signature</span>
                   <div className="border-b border-slate-300 w-full max-w-[125px] h-0"></div>
                   <div className="text-[9.5px] font-bold text-slate-700 mt-1.5 truncate max-w-[130px]" title={selectedEmpName}>
                     : {selectedEmpName}
@@ -2473,6 +2660,58 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
           const stats = getEmployeeSheetStats(emp, empHourlyRate);
           const empPosition = emp.position || 'พนักงาน';
           const empId = emp.id || '';
+
+          const getEmpTableRows = (empName: string, empIdVal: string) => {
+            const list: { draft: any; rowId: string; dStr: string; suppKey: string; isMulti: boolean }[] = [];
+            renderedDates.forEach(dStr => {
+              const dayDrafts = ((empName.toLowerCase().trim() === selectedEmpName?.toLowerCase().trim()
+                ? Object.values(draftEntries)
+                : entries
+              ) as Partial<TimesheetEntry>[])
+                .filter(e => e && e.employeeName && e.employeeName.toLowerCase().trim() === empName.toLowerCase().trim() && e.date === dStr)
+                .sort((a, b) => (a.timeIn || '08:00').localeCompare(b.timeIn || '08:00'));
+
+              if (dayDrafts.length === 0) {
+                list.push({
+                  draft: {
+                    id: `draft-${dStr}`,
+                    employeeName: empName,
+                    date: dStr,
+                    project: projectInput || 'workshop',
+                    timeIn: '',
+                    timeOut: '',
+                    lunchDeduct: 1,
+                    lunchOT: 0,
+                    flatRate: emp.workScheduleType === 'staff',
+                    normalHours: 0,
+                    ot15Hours: 0,
+                    ot20Hours: 0,
+                    ot30Hours: 0,
+                    remark: '',
+                    status: 'Pending'
+                  },
+                  rowId: `draft-${dStr}`,
+                  dStr,
+                  suppKey: `${empIdVal}_${dStr}_draft-${dStr}`,
+                  isMulti: false
+                });
+              } else {
+                const isMulti = dayDrafts.length > 1;
+                dayDrafts.forEach(draft => {
+                  const rowId = draft.id || dStr;
+                  const suppKey = `${empIdVal}_${dStr}_${rowId}`;
+                  list.push({
+                    draft,
+                    rowId,
+                    dStr,
+                    suppKey,
+                    isMulti
+                  });
+                });
+              }
+            });
+            return list;
+          };
           
           return (
             <div 
@@ -2557,17 +2796,17 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
               <div className="border border-slate-400 overflow-hidden mb-3 rounded-xs">
                 <table className="w-full text-left text-[9px] text-slate-900 table-fixed border-collapse">
                   <thead className="bg-slate-100 text-slate-700 text-[7.5px] uppercase font-bold text-center border-b border-slate-400 font-mono tracking-tight">
-                    <tr className="border-b border-slate-400 divide-x divide-slate-400">
-                      <th className="py-1 px-1 w-[55px] font-sans" rowSpan={2}>Day</th>
+                    <tr className="border-b border-slate-400 divide-x divide-slate-400 font-sans text-[7.5px] select-none text-slate-800">
+                      <th className="py-1 px-1 w-[55px]" rowSpan={2}>Day</th>
                       <th className="py-1 px-0.5 w-[22px]" rowSpan={2}>Date</th>
-                      <th className="py-0.5 px-0.5 bg-slate-50" colSpan={3}>Working Time</th>
-                      <th className="py-0.5 px-0.5 bg-slate-50" colSpan={4}>Overtime</th>
-                      <th className="py-1 px-0.5 text-[7.5px] w-[45px] font-sans" rowSpan={2}>Perdiem</th>
-                      <th className="py-1 px-0.5 text-[7.5px] w-[40px] font-sans" rowSpan={2}>Advance</th>
-                      <th className="py-1 px-0.5 text-[7.5px] w-[40px] font-sans" rowSpan={2}>Job Bonus</th>
-                      <th className="py-1 px-1 w-[80px] font-sans" rowSpan={2}>Remark</th>
+                      <th className="py-0.5 px-0.5 bg-slate-50 font-mono" colSpan={3}>Working Time</th>
+                      <th className="py-0.5 px-0.5 bg-slate-50 font-mono" colSpan={4}>Overtime</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[45px]" rowSpan={2}>Perdiem</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Advance</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Job Bonus</th>
+                      <th className="py-1 px-1 w-[80px]" rowSpan={2}>Remark</th>
                     </tr>
-                    <tr className="divide-x divide-slate-400 text-[7px]">
+                    <tr className="divide-x divide-slate-400 font-sans text-[7.5px] select-none text-slate-800">
                       <th className="py-0.5 px-0.5 w-[30px] font-mono">Start</th>
                       <th className="py-0.5 px-0.5 w-[30px] font-mono">End</th>
                       <th className="py-0.5 px-0.5 w-[25px] text-sky-700">Total</th>
@@ -2579,10 +2818,9 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                   </thead>
 
                   <tbody className="divide-y divide-slate-300">
-                    {renderedDates.map((dStr) => {
-                      const draft = getEmployeeEntryForDate(emp.employeeName, dStr);
-                      const key = `${emp.id}_${dStr}`;
-                      const supp = supplements[key] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
+                    {getEmpTableRows(emp.employeeName, empId).map((rowItem) => {
+                      const { draft, rowId, dStr, suppKey, isMulti } = rowItem;
+                      const supp = supplements[suppKey] || supplements[`${empId}_${dStr}`] || { perdiem: 0, advance: 0, jobBonus: 0, remarkOverride: '' };
 
                       const dateObj = new Date(dStr);
                       const dayNum = dateObj.getDate();
@@ -2612,7 +2850,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                         dayTextClass = 'text-purple-700 font-medium';
                       } else if (isSunday) {
                         rowBgClass = 'bg-slate-50';
-                        dayTextClass = 'text-red-600 font-medium';
+                        dayTextClass = 'text-red-650 font-medium';
                       }
 
                       const defaultRemark = optHoliday ? optHoliday.holidayName : '';
@@ -2624,31 +2862,40 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                       const workHoursSum = (draft.normalHours || 0) + (draft.ot15Hours || 0) + (draft.ot20Hours || 0) + (draft.ot30Hours || 0);
 
+                      const dayRows = getEmpTableRows(emp.employeeName, empId).filter(r => r.dStr === dStr);
+                      const isFirstRowOfDay = dayRows[0]?.rowId === rowId;
+
+                      const isAggComp = draft.id?.startsWith('agg-');
+
                       return (
-                        <tr key={dStr} className={`divide-x divide-slate-200 text-center text-[7.5px] h-6 ${rowBgClass}`}>
-                          <td className={`py-0.5 px-0.5 text-left truncate font-sans text-[7.5px] ${dayTextClass}`}>
-                            {dayOfWeekStr}
-                          </td>
-                          <td className="py-0.5 px-0.2 font-bold font-mono text-[7.5px]">
-                            {dayNum}
-                          </td>
-                          <td className="py-0.5 px-0.2 font-mono text-[7.5px] font-bold">
+                        <tr key={rowId} className={`divide-x divide-slate-200 text-center text-[7.5px] h-6 ${rowBgClass}`}>
+                          {isFirstRowOfDay ? (
+                            <td className={`py-0.5 px-0.5 text-left truncate font-sans text-[7.5px] ${dayTextClass}`} rowSpan={dayRows.length}>
+                              {dayOfWeekStr}
+                            </td>
+                          ) : null}
+                          {isFirstRowOfDay ? (
+                            <td className="py-0.5 px-0.2 font-bold font-mono text-[7.5px]" rowSpan={dayRows.length}>
+                              {dayNum}
+                            </td>
+                          ) : null}
+                          <td className="py-0.5 px-0.2 font-mono text-[7px] font-bold">
                             {draft.timeIn || '—'}
                           </td>
                           <td className="py-0.5 px-0.2 font-mono text-[7.5px] font-bold">
                             {draft.timeOut || '—'}
                           </td>
                           <td className="py-0.5 px-0.2 font-mono font-bold text-sky-850 bg-slate-50/20 text-[7.5px]">
-                            {draft.timeIn && draft.timeOut ? workHoursSum.toFixed(1) : '—'}
+                            {(draft.timeIn && draft.timeOut) ? workHoursSum.toFixed(1) : '—'}
                           </td>
                           <td className="py-0.5 px-0.2 font-mono font-bold text-slate-800 text-[7.5px]">
-                            {draft.timeIn && draft.timeOut && itemOt20 > 0 ? itemOt20.toFixed(1) : '—'}
+                            {(draft.timeIn && draft.timeOut) ? (itemOt20 > 0 ? itemOt20.toFixed(1) : '—') : '—'}
                           </td>
                           <td className="py-0.5 px-0.2 font-mono font-medium text-amber-800 text-[7.5px]">
-                            {draft.timeIn && draft.timeOut && itemOt15 > 0 ? itemOt15.toFixed(1) : '—'}
+                            {(draft.timeIn && draft.timeOut) ? (itemOt15 > 0 ? itemOt15.toFixed(1) : '—') : '—'}
                           </td>
                           <td className="py-0.5 px-0.2 font-mono font-medium text-red-650 text-[7.5px]">
-                            {draft.timeIn && draft.timeOut && itemOt30 > 0 ? itemOt30.toFixed(1) : '—'}
+                            {(draft.timeIn && draft.timeOut) ? (itemOt30 > 0 ? itemOt30.toFixed(1) : '—') : '—'}
                           </td>
                           <td className="py-0.5 px-0.2 font-mono text-right font-bold text-slate-800 pr-0.5">
                             {otWageEstimated > 0 ? otWageEstimated.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}
@@ -2681,19 +2928,19 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       </td>
                       <td className="py-1 px-0.2 text-center font-mono font-bold">
                         {(() => {
-                          const sum = renderedDates.reduce((acc, dStr) => acc + (getEmployeeEntryForDate(emp.employeeName, dStr)?.ot20Hours || 0), 0);
+                          const sum = getEmpTableRows(emp.employeeName, empId).reduce((acc, r) => acc + (r.draft.ot20Hours || 0), 0);
                           return sum > 0 ? sum.toFixed(1) : '—';
                         })()}
                       </td>
                       <td className="py-1 px-0.2 text-center font-mono text-amber-800">
                         {(() => {
-                          const sum = renderedDates.reduce((acc, dStr) => acc + (getEmployeeEntryForDate(emp.employeeName, dStr)?.ot15Hours || 0), 0);
+                          const sum = getEmpTableRows(emp.employeeName, empId).reduce((acc, r) => acc + (r.draft.ot15Hours || 0), 0);
                           return sum > 0 ? sum.toFixed(1) : '—';
                         })()}
                       </td>
                       <td className="py-1 px-0.2 text-center font-mono text-red-750">
                         {(() => {
-                          const sum = renderedDates.reduce((acc, dStr) => acc + (getEmployeeEntryForDate(emp.employeeName, dStr)?.ot30Hours || 0), 0);
+                          const sum = getEmpTableRows(emp.employeeName, empId).reduce((acc, r) => acc + (r.draft.ot30Hours || 0), 0);
                           return sum > 0 ? sum.toFixed(1) : '—';
                         })()}
                       </td>
@@ -2702,19 +2949,19 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       </td>
                       <td className="py-1 px-0.2 text-right font-mono font-bold pr-0.5 bg-slate-50/40">
                         {(() => {
-                          const sum = renderedDates.reduce((acc, dStr) => acc + (supplements[`${emp.id}_${dStr}`]?.perdiem || 0), 0);
+                          const sum = getEmpTableRows(emp.employeeName, empId).reduce((acc, r) => acc + ((supplements[r.suppKey] || supplements[`${empId}_${r.dStr}`])?.perdiem || 0), 0);
                           return sum > 0 ? sum.toLocaleString() : '—';
                         })()}
                       </td>
                       <td className="py-1 px-0.2 text-right font-mono pr-0.5">
                         {(() => {
-                          const sum = renderedDates.reduce((acc, dStr) => acc + (supplements[`${emp.id}_${dStr}`]?.advance || 0), 0);
+                          const sum = getEmpTableRows(emp.employeeName, empId).reduce((acc, r) => acc + ((supplements[r.suppKey] || supplements[`${empId}_${r.dStr}`])?.advance || 0), 0);
                           return sum > 0 ? sum.toLocaleString() : '—';
                         })()}
                       </td>
                       <td className="py-1 px-0.2 text-right font-mono font-bold pr-0.5">
                         {(() => {
-                          const sum = renderedDates.reduce((acc, dStr) => acc + (supplements[`${emp.id}_${dStr}`]?.jobBonus || 0), 0);
+                          const sum = getEmpTableRows(emp.employeeName, empId).reduce((acc, r) => acc + ((supplements[r.suppKey] || supplements[`${empId}_${r.dStr}`])?.jobBonus || 0), 0);
                           return sum > 0 ? sum.toLocaleString() : '—';
                         })()}
                       </td>
@@ -2778,7 +3025,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                   <div className="flex flex-col items-center">
                     <span className="font-serif italic text-slate-600 text-[8.5px]">{issuedByInput}</span>
                     <div className="border-b border-slate-300 w-full text-center font-bold text-slate-900 text-[8.5px]">
-                      {issuedByInput}
+                       {issuedByInput}
                     </div>
                     <div className="text-[6px] text-slate-400 mt-0.5 uppercase font-mono">Date: {endDate.split('-').reverse().join('/')}</div>
                   </div>
@@ -2789,7 +3036,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                   <div className="flex flex-col items-center">
                     <span className="font-serif italic text-slate-600 text-[8.5px]">{checkedByInput}</span>
                     <div className="border-b border-slate-300 w-full text-center font-bold text-slate-900 text-[8.5px]">
-                      {checkedByInput}
+                       {checkedByInput}
                     </div>
                     <div className="text-[6px] text-slate-400 mt-0.5 uppercase font-mono">Date: {endDate.split('-').reverse().join('/')}</div>
                   </div>
@@ -2802,7 +3049,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                   <div className="flex flex-col items-center">
                     <span className="font-serif italic text-emerald-600 font-black text-[8.5px]">{approvedByInput}</span>
                     <div className="border-b border-slate-300 w-full text-center font-extrabold text-emerald-700 text-[8.5px]">
-                      {approvedByInput}
+                       {approvedByInput}
                     </div>
                     <div className="text-[6px] text-slate-400 mt-0.5 uppercase font-mono">Date: {endDate.split('-').reverse().join('/')}</div>
                   </div>

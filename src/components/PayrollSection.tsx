@@ -121,10 +121,10 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
     };
   }, []);
 
-  const handleSupplementChange = (empId: string, date: string, field: 'perdiem' | 'confineSpace' | 'incentive' | 'remarkOverride', value: any) => {
-    const key = `${empId}_${date}`;
+  const handleSupplementChange = (empId: string, date: string, field: 'perdiem' | 'confineSpace' | 'incentive' | 'remarkOverride', value: any, entryId?: string) => {
+    const key = entryId ? `${empId}_${date}_${entryId}` : `${empId}_${date}`;
     setSupplements(prev => {
-      const existing = prev[key] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+      const existing = prev[key] || prev[`${empId}_${date}`] || { perdiem: 0, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
       return {
         ...prev,
         [key]: {
@@ -278,8 +278,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       let totalPerdiem = 0;
 
       empEntries.forEach(ent => {
-        const key = `${emp.id}_${ent.date}`;
-        const supp = supplements[key];
+        const rowKey = ent.id ? `${emp.id}_${ent.date}_${ent.id}` : `${emp.id}_${ent.date}`;
+        const supp = supplements[rowKey] || supplements[`${emp.id}_${ent.date}`];
         
         const proj = (ent.project || '').toLowerCase().trim();
         const isOffshore = proj.includes('offshore');
@@ -444,8 +444,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
 
       const normalWage = (ent.normalHours / settings.defaultWorkHours) * baseRate;
 
-      const key = `${emp.id}_${ent.date}`;
-      const supp = supplements[key] || { perdiem: undefined, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
+      const rowKey = ent.id ? `${emp.id}_${ent.date}_${ent.id}` : `${emp.id}_${ent.date}`;
+      const supp = supplements[rowKey] || supplements[`${emp.id}_${ent.date}`] || { perdiem: undefined, advance: 0, jobBonus: 0, confineSpace: 0, incentive: 0, remarkOverride: '' };
 
       const confineSpaceVal = Number(supp.confineSpace || 0);
       const incentiveVal = Number(supp.incentive || 0);
@@ -585,11 +585,11 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         const emp = employees.find(e => e.employeeName.toLowerCase().trim() === ent.employeeName.toLowerCase().trim());
         if (!emp) return;
         
-        const key = `${emp.id}_${ent.date}`;
-        const supp = supplements[key];
+        const rowKey = ent.id ? `${emp.id}_${ent.date}_${ent.id}` : `${emp.id}_${ent.date}`;
+        const supp = supplements[rowKey] || supplements[`${emp.id}_${ent.date}`];
         if (supp) {
           supplementsPayloads.push({
-            ID: key,
+            ID: rowKey,
             EmployeeID: emp.id,
             EmployeeName: emp.employeeName,
             Date: ent.date,
@@ -627,11 +627,11 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
     try {
       const payloads: any[] = [];
       filteredDailyEarnings.forEach(d => {
-        const key = `${d.employeeId}_${d.date}`;
-        const supp = supplements[key];
+        const rowKey = d.id ? `${d.employeeId}_${d.date}_${d.id}` : `${d.employeeId}_${d.date}`;
+        const supp = supplements[rowKey] || supplements[`${d.employeeId}_${d.date}`];
         if (supp) {
           payloads.push({
-            ID: key,
+            ID: rowKey,
             EmployeeID: d.employeeId,
             EmployeeName: d.employeeName,
             Date: d.date,
@@ -1141,7 +1141,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                         <input
                           type="number"
                           value={d.confineSpace || ''}
-                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'confineSpace', parseFloat(e.target.value) || 0)}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'confineSpace', parseFloat(e.target.value) || 0, d.id)}
                           placeholder="0"
                           className={`w-20 text-right px-1.5 py-0.5 bg-transparent border rounded-sm focus:outline-hidden text-[11px] font-mono ${isDark ? 'border-white/10 text-orange-400 focus:border-amber-500' : 'border-slate-300 text-orange-700 font-bold focus:border-amber-500'}`}
                         />
@@ -1150,7 +1150,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                         <input
                           type="number"
                           value={d.incentive || ''}
-                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'incentive', parseFloat(e.target.value) || 0)}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'incentive', parseFloat(e.target.value) || 0, d.id)}
                           placeholder="0"
                           className={`w-20 text-right px-1.5 py-0.5 bg-transparent border rounded-sm focus:outline-hidden text-[11px] font-mono ${isDark ? 'border-white/10 text-teal-400 focus:border-teal-500' : 'border-slate-300 text-teal-700 font-bold focus:border-teal-500'}`}
                         />
@@ -1159,7 +1159,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                         <input
                           type="number"
                           value={d.perdiem || ''}
-                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'perdiem', parseFloat(e.target.value) || 0)}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'perdiem', parseFloat(e.target.value) || 0, d.id)}
                           placeholder="0"
                           className={`w-20 text-right px-1.5 py-0.5 bg-transparent border rounded-sm focus:outline-hidden text-[11px] font-mono ${isDark ? 'border-white/10 text-indigo-400 focus:border-indigo-500' : 'border-slate-300 text-indigo-700 font-bold focus:border-indigo-500'}`}
                         />
@@ -1171,7 +1171,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                         <input
                           type="text"
                           value={d.remark}
-                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'remarkOverride', e.target.value)}
+                          onChange={(e) => handleSupplementChange(d.employeeId, d.date, 'remarkOverride', e.target.value, d.id)}
                           placeholder="เพิ่มหมายเหตุ..."
                           className={`w-32 text-left px-1 py-0.5 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-amber-500 focus:outline-hidden text-[11px] ${isDark ? 'text-gray-300' : 'text-slate-800'}`}
                         />

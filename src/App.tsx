@@ -3,7 +3,7 @@ import { Employee, Holiday, TimesheetEntry, SystemSettings } from './types';
 import { initialEmployees } from './data/employees';
 import { initialHolidays } from './data/holidays';
 import { initialTimesheetEntries } from './data/initialTimesheets';
-import { calculateEntryOT } from './utils/calculator';
+import { calculateEntryOT, rebalanceTimesheetEntries } from './utils/calculator';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -160,10 +160,13 @@ export default function App() {
         });
 
         setEntries(updatedEntries);
-        localStorage.setItem('thai_ot_entries', JSON.stringify(updatedEntries));
+        // Rebalance loaded entries
+        const finalBalanced = rebalanceTimesheetEntries(updatedEntries, activeEmployees, activeHolidays);
+        setEntries(finalBalanced);
+        localStorage.setItem('thai_ot_entries', JSON.stringify(finalBalanced));
 
         // Also update Supabase database for changed ones
-        const changed0504Entries = updatedEntries.filter(entry => entry.date === '2026-05-04');
+        const changed0504Entries = finalBalanced.filter(entry => entry.date === '2026-05-04');
         if (changed0504Entries.length > 0) {
           dbBulkInsertTimesheets(changed0504Entries);
         }
@@ -189,9 +192,11 @@ export default function App() {
     localStorage.setItem('thai_ot_holidays', JSON.stringify(newHolidayList));
   };
 
-  const updateEntriesAndSync = (newEntriesList: TimesheetEntry[]) => {
-    setEntries(newEntriesList);
-    localStorage.setItem('thai_ot_entries', JSON.stringify(newEntriesList));
+  const updateEntriesAndSync = (newEntriesList: TimesheetEntry[]): TimesheetEntry[] => {
+    const balanced = rebalanceTimesheetEntries(newEntriesList, employees, holidays);
+    setEntries(balanced);
+    localStorage.setItem('thai_ot_entries', JSON.stringify(balanced));
+    return balanced;
   };
 
   // State Modification Actions (passed to subcomponents with instant Supabase push)
@@ -262,24 +267,50 @@ export default function App() {
   // 3. Timesheet Entries Managers
   const handleAddEntry = async (entry: TimesheetEntry) => {
     const list = [entry, ...entries];
-    updateEntriesAndSync(list);
-    await dbUpsertTimesheet(entry);
+    const balanced = updateEntriesAndSync(list);
+    
+    // Find all entries on the same day for this employee to sync
+    const targetEmpName = entry.employeeName;
+    const targetDate = entry.date;
+    const groupEntries = balanced.filter(
+      e => e.employeeName.trim().toUpperCase() === targetEmpName.trim().toUpperCase() && e.date === targetDate
+    );
+    if (groupEntries.length > 0) {
+      await dbBulkInsertTimesheets(groupEntries);
+    }
   };
 
   const handleUpdateEntry = async (id: string, updated: Partial<TimesheetEntry>) => {
     const list = entries.map(e => e.id === id ? { ...e, ...updated } : e);
-    updateEntriesAndSync(list);
+    const balanced = updateEntriesAndSync(list);
 
-    const matchObj = list.find(e => e.id === id);
-    if (matchObj) {
-      await dbUpsertTimesheet(matchObj);
+    // Find the master record to see which employee/date group was affected
+    const targetObj = balanced.find(e => e.id === id) || entries.find(e => e.id === id);
+    if (targetObj) {
+      const groupEntries = balanced.filter(
+        e => e.employeeName.trim().toUpperCase() === targetObj.employeeName.trim().toUpperCase() && e.date === targetObj.date
+      );
+      if (groupEntries.length > 0) {
+        await dbBulkInsertTimesheets(groupEntries);
+      }
     }
   };
 
   const handleDeleteEntry = async (id: string) => {
+    const targetObj = entries.find(e => e.id === id);
     const list = entries.filter(e => e.id !== id);
-    updateEntriesAndSync(list);
+    const balanced = updateEntriesAndSync(list);
+
     await dbDeleteTimesheet(id);
+
+    if (targetObj) {
+      const groupEntries = balanced.filter(
+        e => e.employeeName.trim().toUpperCase() === targetObj.employeeName.trim().toUpperCase() && e.date === targetObj.date
+      );
+      if (groupEntries.length > 0) {
+        await dbBulkInsertTimesheets(groupEntries);
+      }
+    }
   };
 
   const handleBulkAddEntries = async (newParsedList: TimesheetEntry[]) => {
@@ -354,8 +385,22 @@ export default function App() {
 
     // 3. Save timesheets and sync
     const list = [...parsedWithCorrectNames, ...entries];
-    updateEntriesAndSync(list);
-    await dbBulkInsertTimesheets(parsedWithCorrectNames);
+    const balanced = updateEntriesAndSync(list);
+
+    // Save all entries on the affected dates for the affected employees
+    const affectedKeys = new Set<string>();
+    parsedWithCorrectNames.forEach(e => {
+      affectedKeys.add(`${e.employeeName.trim().toUpperCase()}_${e.date}`);
+    });
+
+    const entriesToSync = balanced.filter(e => {
+      const key = `${e.employeeName.trim().toUpperCase()}_${e.date}`;
+      return affectedKeys.has(key);
+    });
+
+    if (entriesToSync.length > 0) {
+      await dbBulkInsertTimesheets(entriesToSync);
+    }
   };
 
   const handleClearAllEntries = async () => {

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SystemSettings } from '../types';
-import { Sliders, Save, CheckCircle, RotateCcw, AlertTriangle, Coins, ShieldCheck, HelpCircle } from 'lucide-react';
+import { Sliders, Save, CheckCircle, RotateCcw, AlertTriangle, Coins, ShieldCheck, HelpCircle, Database, RefreshCw, Server, CheckCircle2, XCircle } from 'lucide-react';
+import { getSupabaseCredentials, updateSupabaseClient, dbCheckTablesStatus } from '../lib/supabaseClient';
 
 interface SettingsSectionProps {
   settings: SystemSettings;
@@ -16,6 +17,55 @@ export default function SettingsSection({ settings, onUpdateSettings, isDark }: 
   const [workHours, setWorkHours] = useState(settings.defaultWorkHours);
   
   const [showStatus, setShowStatus] = useState<boolean>(false);
+
+  // Supabase dynamic states
+  const { url: initialUrl, key: initialKey } = getSupabaseCredentials();
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(initialUrl);
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState(initialKey);
+  const [isTestingSupa, setIsTestingSupa] = useState(false);
+  const [supaStatus, setSupaStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [showSupaSuccessMsg, setShowSupaSuccessMsg] = useState(false);
+  const [supaErrMsg, setSupaErrMsg] = useState('');
+  const [showSqlHelper, setShowSqlHelper] = useState(false);
+  const [tableStatus, setTableStatus] = useState<Record<string, boolean>>({
+    EmployeeRates: false,
+    TIMESHEET: false,
+    RateCalulate: false,
+    'Sumary-Mount': false,
+    IndividualSupplements: false
+  });
+
+  // Verify connection immediately on mount
+  useEffect(() => {
+    checkDatabaseConnection(initialUrl, initialKey);
+  }, []);
+
+  const checkDatabaseConnection = async (url: string, key: string) => {
+    if (!url || !key) return;
+    setIsTestingSupa(true);
+    setSupaStatus('idle');
+    setSupaErrMsg('');
+    try {
+      updateSupabaseClient(url, key);
+      const status = await dbCheckTablesStatus();
+      setTableStatus(status);
+      
+      const anyTableSuccess = Object.values(status).some(v => v === true);
+      setSupaStatus('success');
+    } catch (err: any) {
+      setSupaStatus('error');
+      setSupaErrMsg(err?.message || 'ไม่สามารถเชื่อมต่อได้ ตรวจสอบ URL หรือคีย์ของคุณ');
+    } finally {
+      setIsTestingSupa(false);
+    }
+  };
+
+  const handleSupaSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await checkDatabaseConnection(supabaseUrlInput, supabaseKeyInput);
+    setShowSupaSuccessMsg(true);
+    setTimeout(() => setShowSupaSuccessMsg(false), 3000);
+  };
 
   const resetToDefault = () => {
     setOt15(1.5);
@@ -243,6 +293,357 @@ export default function SettingsSection({ settings, onUpdateSettings, isDark }: 
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Supabase Connection Widget */}
+        <div className={`md:col-span-3 p-6 rounded-sm border ${bgCard} space-y-6`}>
+          <div className="border-b border-dashed border-white/10 pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h3 className={`text-xs font-bold uppercase tracking-wider ${textTitle} flex items-center gap-2`}>
+                <Database className="w-4 h-4 text-[#D4AF37]" />
+                หน้าเชื่อมต่อระบบคลาวด์ฐานข้อมูล Supabase (Live Database Control Panel)
+              </h3>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                เชื่อมต่อกับโปรเจกต์ Supabase ส่วนตัวของคุณแบบ Dynamic ทุกครั้งที่บันทึกหรือดึงตารางทำงานรายชื่อพนักงานจะดำเนินการบน Supabase เป็นสำคัญ
+              </p>
+            </div>
+            
+            {/* Connection Status Badge */}
+            <div>
+              {isTestingSupa ? (
+                <span className="flex items-center gap-1.5 text-sky-400 text-xs font-bold font-mono bg-sky-950/40 px-3 py-1 rounded-full border border-sky-900/30">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  กำลังตรวจสอบ...
+                </span>
+              ) : supaStatus === 'success' ? (
+                <span className="flex items-center gap-1.5 text-emerald-400 text-xs font-bold font-mono bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-900/30 animate-pulse">
+                  <Server className="w-3.5 h-3.5 text-emerald-400" />
+                  เชื่อมต่อระบบคลาวด์แล้ว (Live)
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-red-500 text-xs font-bold font-mono bg-red-950/40 px-3 py-1 rounded-full border border-red-900/30">
+                  <XCircle className="w-3.5 h-3.5 text-red-500" />
+                  ไม่พบฐานข้อมูลหรือยังไม่ได้ตั้งค่า
+                </span>
+              )}
+            </div>
+          </div>
+
+          <form onSubmit={handleSupaSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className={`block uppercase tracking-wider ${labelText}`}>Supabase API URL</label>
+              <input
+                type="url"
+                value={supabaseUrlInput}
+                onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                placeholder="https://your-project.supabase.co"
+                className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-none ${inputBg}`}
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={`block uppercase tracking-wider ${labelText}`}>Supabase Secret Service/Anon Key</label>
+              <input
+                type="password"
+                value={supabaseKeyInput}
+                onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIs..."
+                className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-none ${inputBg}`}
+                required
+              />
+            </div>
+
+            <div className="md:col-span-2 pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                {showSupaSuccessMsg && (
+                  <span className="text-emerald-500 font-bold text-xs animate-fade-in bg-emerald-500/10 py-1 px-2.5 rounded-full">
+                     เชื่อมต่อสำเร็จ! ตรวจสอบตารางและบันทึกคีย์เรียบร้อย
+                  </span>
+                )}
+                {supaErrMsg && (
+                  <span className="text-red-400 font-bold text-xs animate-fade-in bg-red-500/10 py-1 px-2.5 rounded-full">
+                    ⚠️ {supaErrMsg}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowSqlHelper(!showSqlHelper)}
+                  className="flex items-center justify-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-[#D4AF37] font-semibold text-xs py-2 px-4 rounded-sm border border-amber-900/20 cursor-pointer w-full sm:w-auto"
+                >
+                  📜 {showSqlHelper ? 'ปิดโค้ด SQL' : 'ดูคำสั่งสร้างตาราง SQL'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTestingSupa}
+                  className="flex items-center justify-center gap-2 bg-[#D4AF37] hover:bg-amber-400 text-black font-extrabold text-xs py-2 px-5 rounded-sm transition-all shadow-md cursor-pointer disabled:opacity-50 w-full sm:w-auto"
+                >
+                  <Save className="w-4 h-4" />
+                  {isTestingSupa ? 'กำลังบันทึก...' : 'บันทึกเชื่อมต่อ & ตรวจสุขภาพระบบ'}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* Table Health Diagnostics */}
+          <div className="bg-slate-900/10 dark:bg-slate-950/20 p-4 rounded-sm border border-slate-300 dark:border-white/5 space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
+              📊 สถานะความสมบูรณ์ของโครงสร้างตารางระบบ (Database Table Integrity Checker)
+            </h4>
+            <p className="text-[10.5px] text-slate-500">
+              ระบบตรวจสอบความสมบูรณ์ของการติดตั้ง ทั้ง 5 ตารางหลักเพื่อความมั่นใจในการจัดเก็บข้อมูลอย่างถาวร
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 pt-1.5">
+              {Object.entries(tableStatus).map(([name, status]) => (
+                <div key={name} className={`p-2.5 rounded border text-center flex flex-col items-center justify-center gap-1 transition-all ${
+                  status 
+                    ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs' 
+                    : 'bg-amber-500/5 border-amber-500/20 text-amber-600 dark:text-amber-500'
+                }`}>
+                  <span className="text-[10px] font-mono whitespace-nowrap truncate max-w-full" title={name}>{name}</span>
+                  {status ? (
+                    <span className="text-[9px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 font-extrabold py-0.5 px-2 rounded-full border border-emerald-500/10">สมบูรณ์</span>
+                  ) : (
+                    <span className="text-[9px] bg-amber-500/10 text-amber-700 dark:text-amber-300 font-extrabold py-0.5 px-2 rounded-full border border-amber-500/15 animate-pulse">ไม่พบตาราง</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Full copyable SQL Schema script box directly inside settings */}
+          {showSqlHelper && (
+            <div className="p-4 bg-zinc-900 border border-[#D4AF37]/20 rounded-sm text-xs text-slate-300 space-y-3 max-w-[1000px] animate-fade-in">
+              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                <span className="font-extrabold text-amber-400 flex items-center gap-2 text-[11px] font-serif tracking-wider uppercase">
+                  📜 สคริปต์ SQL สำหรับสร้างตารางทั้ง 5 ตัว (Execute in your Supabase SQL Editor)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`-- SUPABASE ALL TABLES SCHEMA
+-- 1. EmployeeRates
+create table if not exists public."EmployeeRates" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeID" text unique not null,
+    "EmployeeName" text not null,
+    "StaffSalary" numeric(12, 2) default 0.00,
+    "OfficeSalary" numeric(12, 2) default 0.00,
+    "TransportationRate" numeric(12, 2) default 0.00,
+    "WorkshopRate" numeric(12, 2) default 0.00,
+    "OnsiteRate" numeric(12, 2) default 0.00,
+    "OffshoreRate" numeric(12, 2) default 0.00,
+    "WFHRate" numeric(12, 2) default 0.00,
+    "Position" text default 'Technician',
+    "Status" text default 'active',
+    "BankName" text,
+    "BankAccount" text,
+    "StudentLoan" numeric(12, 2) default 0.00,
+    "WorkScheduleType" text default 'daily_worker',
+    "isFlatRate" boolean default false,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."EmployeeRates" disable row level security;
+
+-- 2. TIMESHEET
+create table if not exists public."TIMESHEET" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeName" text not null,
+    "Date" date not null,
+    "Project" text default 'workshop',
+    "TimeIn" text default '08:00',
+    "TimeOut" text default '17:00',
+    "LunchDeduct" integer default 1,
+    "LunchOT" integer default 0,
+    "NormalHours" numeric(5, 2) default 0.00,
+    "OT15Hours" numeric(5, 2) default 0.00,
+    "OT20Hours" numeric(5, 2) default 0.00,
+    "OT30Hours" numeric(5, 2) default 0.00,
+    "Remark" text,
+    "Status" text default 'Pending',
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null,
+    "UpdatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."TIMESHEET" disable row level security;
+
+-- 3. RateCalulate
+create table if not exists public."RateCalulate" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeName" text not null,
+    "Date" date not null,
+    "Project" text not null,
+    "RATE" numeric(12, 2) default 0.00,
+    "LunchOT" integer default 0,
+    "NormalHours" numeric(5, 2) default 0.00,
+    "OT15Hours" numeric(5, 2) default 0.00,
+    "OT20Hours" numeric(5, 2) default 0.00,
+    "OT30Hours" numeric(5, 2) default 0.00,
+    "Remark" text,
+    "OTCalculated" numeric(12, 2) default 0.00,
+    "Sumtotal" numeric(12, 2) default 0.00,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."RateCalulate" disable row level security;
+
+-- 4. Sumary-Mount
+create table if not exists public."Sumary-Mount" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeName" text not null,
+    "StartDate" date not null,
+    "EndDate" date not null,
+    "TotalTime" numeric(8, 2) default 0.00,
+    "TotalDays" integer default 0,
+    "NetNormal" numeric(12, 2) default 0.00,
+    "OT15Wage" numeric(12, 2) default 0.00,
+    "OT20Wage" numeric(12, 2) default 0.00,
+    "OT30Wage" numeric(12, 2) default 0.00,
+    "OtherIncome" numeric(12, 2) default 0.00,
+    "OtherDeductions" numeric(12, 2) default 0.00,
+    "TaxDeduct" numeric(12, 2) default 0.00,
+    "SocialSecurity" numeric(12, 2) default 0.00,
+    "StudentLoan" numeric(12, 2) default 0.00,
+    "TotalIncome" numeric(12, 2) default 0.00,
+    "NetIncome" numeric(12, 2) default 0.00,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."Sumary-Mount" disable row level security;
+
+-- 5. IndividualSupplements
+create table if not exists public."IndividualSupplements" (
+    "ID" text primary key,
+    "EmployeeID" text not null,
+    "EmployeeName" text not null,
+    "Date" date not null,
+    "Perdiem" numeric(12, 2) default 0.00,
+    "Advance" numeric(12, 2) default 0.00,
+    "JobBonus" numeric(12, 2) default 0.00,
+    "ConfineSpace" numeric(12, 2) default 0.00,
+    "Incentive" numeric(12, 2) default 0.00,
+    "Remark" text,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null,
+    "UpdatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."IndividualSupplements" disable row level security;`);
+                    alert('คัดลอกโค้ด SQL ตารางระบบไปยังคลิปบอร์ดแล้ว! นำไปรันหน้า SQL Editor ใน Supabase ได้ทันที');
+                  }}
+                  className="text-amber-400 font-bold text-xs underline cursor-pointer hover:text-amber-300"
+                >
+                  📋 คัดลอก SQL ทั้ง 5 ตาราง
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                เนื่องจากเป็นการซิงโครไนซ์แบบสองทิศทาง (Real-time Cloud Integration) กรุณานำสคริปต์ SQL นี้ไปรันที่ <strong className="text-white">Supabase Console ↗</strong> ช่องเมนู <strong className="text-white font-mono">SQL Editor (New Query)</strong> แล้วกด <strong className="text-white font-mono">Run</strong>:
+              </p>
+              <pre className="p-3 bg-black/60 text-[10px] font-mono text-emerald-400 border border-white/5 rounded max-h-56 overflow-y-auto select-all scrollbar-thin">
+{`-- SUPABASE ALL TABLES SCHEMA
+-- 1. EmployeeRates Table
+create table if not exists public."EmployeeRates" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeID" text unique not null,
+    "EmployeeName" text not null,
+    "StaffSalary" numeric(12, 2) default 0.00,
+    "OfficeSalary" numeric(12, 2) default 0.00,
+    "TransportationRate" numeric(12, 2) default 0.00,
+    "WorkshopRate" numeric(12, 2) default 0.00,
+    "OnsiteRate" numeric(12, 2) default 0.00,
+    "OffshoreRate" numeric(12, 2) default 0.00,
+    "WFHRate" numeric(12, 2) default 0.00,
+    "Position" text default 'Technician',
+    "Status" text default 'active',
+    "BankName" text,
+    "BankAccount" text,
+    "StudentLoan" numeric(12, 2) default 0.00,
+    "WorkScheduleType" text default 'daily_worker',
+    "isFlatRate" boolean default false,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."EmployeeRates" disable row level security;
+
+-- 2. TIMESHEET Table
+create table if not exists public."TIMESHEET" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeName" text not null,
+    "Date" date not null,
+    "Project" text default 'workshop',
+    "TimeIn" text default '08:00',
+    "TimeOut" text default '17:00',
+    "LunchDeduct" integer default 1,
+    "LunchOT" integer default 0,
+    "NormalHours" numeric(5, 2) default 0.00,
+    "OT15Hours" numeric(5, 2) default 0.00,
+    "OT20Hours" numeric(5, 2) default 0.00,
+    "OT30Hours" numeric(5, 2) default 0.00,
+    "Remark" text,
+    "Status" text default 'Pending',
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null,
+    "UpdatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."TIMESHEET" disable row level security;
+
+-- 3. RateCalulate
+create table if not exists public."RateCalulate" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeName" text not null,
+    "Date" date not null,
+    "Project" text not null,
+    "RATE" numeric(12, 2) default 0.00,
+    "LunchOT" integer default 0,
+    "NormalHours" numeric(5, 2) default 0.00,
+    "OT15Hours" numeric(5, 2) default 0.00,
+    "OT20Hours" numeric(5, 2) default 0.00,
+    "OT30Hours" numeric(5, 2) default 0.00,
+    "Remark" text,
+    "OTCalculated" numeric(12, 2) default 0.00,
+    "Sumtotal" numeric(12, 2) default 0.00,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."RateCalulate" disable row level security;
+
+-- 4. Sumary-Mount
+create table if not exists public."Sumary-Mount" (
+    "ID" uuid default uuid_generate_v4() primary key,
+    "EmployeeName" text not null,
+    "StartDate" date not null,
+    "EndDate" date not null,
+    "TotalTime" numeric(8, 2) default 0.00,
+    "TotalDays" integer default 0,
+    "NetNormal" numeric(12, 2) default 0.00,
+    "OT15Wage" numeric(12, 2) default 0.00,
+    "OT20Wage" numeric(12, 2) default 0.00,
+    "OT30Wage" numeric(12, 2) default 0.00,
+    "OtherIncome" numeric(12, 2) default 0.00,
+    "OtherDeductions" numeric(12, 2) default 0.00,
+    "TaxDeduct" numeric(12, 2) default 0.00,
+    "SocialSecurity" numeric(12, 2) default 0.00,
+    "StudentLoan" numeric(12, 2) default 0.00,
+    "TotalIncome" numeric(12, 2) default 0.00,
+    "NetIncome" numeric(12, 2) default 0.00,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."Sumary-Mount" disable row level security;
+
+-- 5. IndividualSupplements Table
+create table if not exists public."IndividualSupplements" (
+    "ID" text primary key,
+    "EmployeeID" text not null,
+    "EmployeeName" text not null,
+    "Date" date not null,
+    "Perdiem" numeric(12, 2) default 0.00,
+    "Advance" numeric(12, 2) default 0.00,
+    "JobBonus" numeric(12, 2) default 0.00,
+    "ConfineSpace" numeric(12, 2) default 0.00,
+    "Incentive" numeric(12, 2) default 0.00,
+    "Remark" text,
+    "CreatedAt" timestamp with time zone default timezone('utc'::text, now()) not null,
+    "UpdatedAt" timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public."IndividualSupplements" disable row level security;`}
+              </pre>
+            </div>
+          )}
         </div>
       </div>
     </div>

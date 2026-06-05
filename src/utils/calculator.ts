@@ -1,4 +1,4 @@
-import { Holiday, CalculationResult } from '../types';
+import { Holiday, CalculationResult, TimesheetEntry, Employee } from '../types';
 
 export function parseTimeToDecimal(timeStr: string): number {
   if (!timeStr || !timeStr.trim()) return 0;
@@ -218,4 +218,133 @@ export function calculateEntryOT(
     ot30Hours,
     totalHours: total
   };
+}
+
+export function rebalanceTimesheetEntries(
+  allEntries: TimesheetEntry[],
+  employees: Employee[],
+  holidays: Holiday[]
+): TimesheetEntry[] {
+  // Group entries by employeeName (case-insensitive) and date
+  const groups: Record<string, TimesheetEntry[]> = {};
+  allEntries.forEach(entry => {
+    if (!entry.employeeName || !entry.date) return;
+    const key = `${entry.employeeName.trim().toUpperCase()}_${entry.date}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(entry);
+  });
+
+  const rebalancedList: TimesheetEntry[] = [];
+
+  // For each employee + date group
+  Object.keys(groups).forEach(key => {
+    const dayEntries = groups[key];
+    if (dayEntries.length <= 1) {
+      // Direct pass-through if only 0 or 1 entries on this date, since it's already computed correctly
+      rebalancedList.push(...dayEntries);
+      return;
+    }
+
+    // Sort entries chronologically by timeIn, so the first shift is processed first
+    const sorted = [...dayEntries].sort((a, b) => {
+      return (a.timeIn || '08:00').localeCompare(b.timeIn || '08:00');
+    });
+
+    const firstEntry = sorted[0];
+    const employee = employees.find(emp => {
+      const normTarget = emp.employeeName.trim().toUpperCase();
+      const normInput = firstEntry.employeeName.trim().toUpperCase();
+      return normTarget === normInput || normTarget.includes(normInput) || normInput.includes(normTarget);
+    });
+
+    const isFlat = employee?.isFlatRate || false;
+    const workType = employee?.workScheduleType;
+    const pos = employee?.position;
+
+    // Daily normal limit based on the calendar day status
+    const { check: isPubHoliday } = isHoliday(firstEntry.date, holidays);
+    const dayOfWeek = getDayOfWeek(firstEntry.date);
+    const isSunday = dayOfWeek === 0;
+    const isSaturday = dayOfWeek === 6;
+
+    let maxNormalHoursAllowed = 8.0;
+    if (isPubHoliday || isSunday) {
+      maxNormalHoursAllowed = 0.0;
+    } else if (isSaturday) {
+      const isDailyWorker = workType === 'daily_worker' || (pos && pos.toLowerCase().includes('daily'));
+      maxNormalHoursAllowed = isDailyWorker ? 8.0 : 4.0;
+    }
+
+    let usedNormalHours = 0.0;
+    let usedOt20Hours = 0.0; // Sunday / Holiday base OT 2.0 hours limit (8.0 limit)
+
+    const processed = sorted.map(entry => {
+      // Standard independent calculation first
+      const calc = calculateEntryOT(
+        entry.date,
+        entry.timeIn,
+        entry.timeOut,
+        entry.lunchDeduct ?? 1,
+        entry.lunchOT ?? 0,
+        isFlat,
+        holidays,
+        entry.project,
+        workType,
+        pos
+      );
+
+      let normal = calc.normalHours;
+      let ot15 = calc.ot15Hours;
+      let ot20 = calc.ot20Hours;
+      let ot30 = calc.ot30Hours;
+
+      if (isFlat) {
+        // Flat rate just uses the standard flat calculation up to 12.0 hours
+        return {
+          ...entry,
+          normalHours: normal,
+          ot15Hours: ot15,
+          ot20Hours: ot20,
+          ot30Hours: ot30,
+          totalHours: calc.totalHours
+        };
+      }
+
+      // Rebalance normal hours on Weekday or Saturday
+      if (maxNormalHoursAllowed > 0) {
+        const availableNormal = Math.max(0, maxNormalHoursAllowed - usedNormalHours);
+        if (normal > availableNormal) {
+          const excess = normal - availableNormal;
+          normal = availableNormal;
+          ot15 += excess; // Shift converted excess normal hours to OT 1.5
+        }
+        usedNormalHours += normal;
+      }
+
+      // Rebalance Sunday/Holiday OT 2.0 / OT 3.0 (First 8 hours OT 2.0, excess OT 3.0)
+      if (isPubHoliday || isSunday) {
+        const maxOt20Allowed = 8.0;
+        const availableOt20 = Math.max(0, maxOt20Allowed - usedOt20Hours);
+        if (ot20 > availableOt20) {
+          const excess = ot20 - availableOt20;
+          ot20 = availableOt20;
+          ot30 += excess;
+        }
+        usedOt20Hours += ot20;
+      }
+
+      return {
+        ...entry,
+        normalHours: Number(normal.toFixed(2)),
+        ot15Hours: Number(ot15.toFixed(2)),
+        ot20Hours: Number(ot20.toFixed(2)),
+        ot30Hours: Number(ot30.toFixed(2)),
+        totalHours: Number((normal + ot15 + ot20 + ot30).toFixed(2))
+      };
+    });
+
+    rebalancedList.push(...processed);
+  });
+
+  return rebalancedList;
 }
