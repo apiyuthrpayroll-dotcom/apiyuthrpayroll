@@ -5,7 +5,7 @@ import {
   UserCheck, AlertCircle, FileText, CheckCircle2, 
   Printer, ArrowRight, Save, Coins, ShieldCheck
 } from 'lucide-react';
-import { supabase, dbSaveMonthlySummary, dbSaveRateCalculation, dbFetchSupplements, dbSaveSupplements } from '../lib/supabaseClient';
+import { supabase, dbSaveMonthlySummary, dbSaveRateCalculation, dbFetchSupplements, dbSaveSupplements, dbFetchMonthlySummaries, stringToUUID } from '../lib/supabaseClient';
 
 interface PayrollSectionProps {
   employees: Employee[];
@@ -120,6 +120,62 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       active = false;
     };
   }, []);
+
+  // Load monthly summaries overrides from Supabase on cutoff dates or employees changes
+  React.useEffect(() => {
+    let active = true;
+    async function loadSummariesFromDb() {
+      if (!startDate || !endDate || employees.length === 0) return;
+      try {
+        const data = await dbFetchMonthlySummaries(startDate, endDate);
+        if (!active) return;
+        if (data && data.length > 0) {
+          const loadedAllowances: Record<string, number> = {};
+          const loadedDeductions: Record<string, number> = {};
+          const loadedCustomTaxes: Record<string, number> = {};
+          const loadedCustomStudentLoans: Record<string, number> = {};
+
+          data.forEach((row: any) => {
+            const emp = employees.find(e => e.employeeName.toLowerCase().trim() === row.EmployeeName.toLowerCase().trim());
+            if (emp) {
+              if (row.OtherIncome !== undefined && row.OtherIncome !== null) {
+                loadedAllowances[emp.id] = Number(row.OtherIncome);
+              }
+              if (row.OtherDeductions !== undefined && row.OtherDeductions !== null) {
+                loadedDeductions[emp.id] = Number(row.OtherDeductions);
+              }
+              if (row.TaxDeduct !== undefined && row.TaxDeduct !== null) {
+                loadedCustomTaxes[emp.id] = Number(row.TaxDeduct);
+              }
+              if (row.StudentLoan !== undefined && row.StudentLoan !== null) {
+                loadedCustomStudentLoans[emp.id] = Number(row.StudentLoan);
+              }
+            }
+          });
+
+          // Blend with existing local states
+          if (Object.keys(loadedAllowances).length > 0) {
+            setAllowances(prev => ({ ...prev, ...loadedAllowances }));
+          }
+          if (Object.keys(loadedDeductions).length > 0) {
+            setDeductions(prev => ({ ...prev, ...loadedDeductions }));
+          }
+          if (Object.keys(loadedCustomTaxes).length > 0) {
+            setCustomTaxes(prev => ({ ...prev, ...loadedCustomTaxes }));
+          }
+          if (Object.keys(loadedCustomStudentLoans).length > 0) {
+            setCustomStudentLoans(prev => ({ ...prev, ...loadedCustomStudentLoans }));
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not load monthly summary overrides:', err);
+      }
+    }
+    loadSummariesFromDb();
+    return () => {
+      active = false;
+    };
+  }, [startDate, endDate, employees]);
 
   const handleSupplementChange = (empId: string, date: string, field: 'perdiem' | 'confineSpace' | 'incentive' | 'remarkOverride', value: any, entryId?: string) => {
     const key = entryId ? `${empId}_${date}_${entryId}` : `${empId}_${date}`;
@@ -514,8 +570,9 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         .filter(p => p.daysWorked > 0)
         .map(p => {
           // Construct deterministic sync ID to prevent duplicate listings on same cycle
-          const hashId = `${p.id}-${startDate}-${endDate}`;
+          const hashId = stringToUUID(`${p.id}-${startDate}-${endDate}`);
           return {
+            ID: hashId,
             EmployeeName: p.name,
             StartDate: startDate,
             EndDate: endDate,
@@ -525,11 +582,11 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
             OT15Wage: p.ot15Wage,
             OT20Wage: p.ot20Wage,
             OT30Wage: p.ot30Wage,
-            OtherIncome: p.transportAllowance + p.extraAllowance,
-            OtherDeductions: p.otherDeduction,
-            TaxDeduct: p.tax,
-            SocialSecurity: p.sso,
-            StudentLoan: p.studentLoan,
+            OtherIncome: allowances[p.id] || 0, // Other Income (กรอกเอง)
+            OtherDeductions: p.otherDeduction, // Deduction (กรอกเอง)
+            TaxDeduct: p.tax, // หักภาษี 3%
+            SocialSecurity: p.sso, // หักประกันสังคม (2569)
+            StudentLoan: p.studentLoan, // หัก กยศ.
             TotalIncome: p.totalIncome,
             NetIncome: p.netIncome
           };

@@ -117,6 +117,45 @@ export default function IndividualReport({
     return employees.find(e => e.employeeName.toLowerCase().trim() === selectedEmpName.toLowerCase().trim()) || null;
   }, [employees, selectedEmpName]);
 
+  const [empSearch, setEmpSearch] = useState<string>('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+
+  // Sync empSearch when activeEmployee changes
+  useEffect(() => {
+    if (activeEmployee) {
+      setEmpSearch(activeEmployee.employeeName);
+    }
+  }, [activeEmployee]);
+
+  const filteredEmployeesForSelect = useMemo(() => {
+    const query = empSearch.toLowerCase().trim();
+    if (!query) return employees;
+    // If exact match to currently selected, show all on focus so they can select others
+    if (activeEmployee && query === activeEmployee.employeeName.toLowerCase().trim()) {
+      return employees;
+    }
+    return employees.filter(emp =>
+      emp.employeeName.toLowerCase().includes(query) ||
+      emp.id.toLowerCase().includes(query)
+    );
+  }, [employees, empSearch, activeEmployee]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      const container = document.getElementById('employee-search-container');
+      if (container && !container.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+        if (activeEmployee) {
+          setEmpSearch(activeEmployee.employeeName);
+        }
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [activeEmployee]);
+
   // Sync profile metadata input fields when active employee changes
   useEffect(() => {
     if (activeEmployee) {
@@ -1237,19 +1276,65 @@ export default function IndividualReport({
 
         {/* Dynamic Context Filters Grid */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-5 pt-5 border-t border-dashed border-white/10">
-          <div>
+          <div className="relative" id="employee-search-container">
             <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">สับเปลี่ยนช่างพนักงาน (Employee)</label>
-            <select
-              value={selectedEmpName}
-              onChange={(e) => setSelectedEmpName(e.target.value)}
-              className={`w-full text-xs rounded-sm py-2 px-3 focus:outline-hidden ${inputBg} font-semibold`}
-            >
-              {employees.map(emp => (
-                <option key={emp.id} value={emp.employeeName} className={isDark ? 'bg-black text-white' : 'bg-white text-slate-800'}>
-                  [{emp.id}] - {emp.employeeName}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <input
+                type="text"
+                value={empSearch}
+                onFocus={() => setIsDropdownOpen(true)}
+                onChange={(e) => {
+                  setEmpSearch(e.target.value);
+                  setIsDropdownOpen(true);
+                }}
+                placeholder="ค้นหารหัส หรือ ชื่อพนักงาน..."
+                className={`w-full text-xs rounded-sm py-2 pl-3 pr-8 focus:outline-hidden ${inputBg} font-semibold`}
+              />
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="absolute right-2 top-2 text-gray-400 hover:text-white cursor-pointer"
+              >
+                <Search className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {isDropdownOpen && (
+              <div 
+                className={`absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-sm border shadow-xl ${
+                  isDark ? 'bg-[#181818] border-white/10 text-white' : 'bg-white border-slate-300 text-slate-800'
+                }`}
+              >
+                {filteredEmployeesForSelect.length > 0 ? (
+                  filteredEmployeesForSelect.map(emp => {
+                    const isSelected = activeEmployee && activeEmployee.id === emp.id;
+                    return (
+                      <button
+                        key={emp.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedEmpName(emp.employeeName);
+                          setEmpSearch(emp.employeeName);
+                          setIsDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between cursor-pointer ${
+                          isSelected 
+                            ? 'bg-[#D4AF37]/20 text-[#D4AF37] font-bold' 
+                            : isDark ? 'hover:bg-white/5' : 'hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="truncate">
+                          [{emp.id}] - {emp.employeeName}
+                        </span>
+                        {isSelected && <Check className="w-3 h-3 text-[#D4AF37]" />}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="p-3 text-xs text-gray-500 text-center">ไม่พบพนักงานที่ค้นหา</div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

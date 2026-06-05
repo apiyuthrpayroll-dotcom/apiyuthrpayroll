@@ -501,6 +501,24 @@ export async function dbSaveRateCalculation(calcPayloads: any[]) {
 }
 
 /**
+ * Helper to convert any string deterministically into a valid UUID format.
+ * Essential for Supabase tables expecting UUID primary keys (like Sumary-Mount, RateCalulate).
+ */
+export function stringToUUID(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  let hex = '';
+  for (let i = 0; i < 32; i++) {
+    const code = Math.abs(Math.sin(hash + i) * 10000);
+    const value = Math.floor(code % 16);
+    hex += value.toString(16);
+  }
+  return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-4${hex.substring(13, 16)}-a${hex.substring(17, 20)}-${hex.substring(20, 32)}`;
+}
+
+/**
  * Save computed Payroll summary into "Sumary-Mount" (Summary Month)
  */
 export async function dbSaveMonthlySummary(summaries: any[]) {
@@ -509,15 +527,47 @@ export async function dbSaveMonthlySummary(summaries: any[]) {
   }
   try {
     const tableName = await getTableRef('Sumary-Mount', ['sumary_mount', 'SummaryMonth', 'summary_month']);
+    
+    // Ensure all entries have a deterministic valid UUID ID
+    const processedSummaries = summaries.map(s => {
+      if (!s.ID) {
+        // Fallback deterministic ID generation if not provided
+        s.ID = stringToUUID(`${s.EmployeeName || ''}-${s.StartDate || ''}-${s.EndDate || ''}`);
+      }
+      return s;
+    });
+
     const { error } = await supabase
       .from(tableName)
-      .upsert(summaries, { onConflict: 'ID' });
+      .upsert(processedSummaries, { onConflict: 'ID' });
 
     if (error) {
       console.warn('⚠️ Supabase Sumary-Mount warning (ensure schema is loaded):', error.message);
     }
   } catch (err: any) {
     // Graceful warning
+  }
+}
+
+/**
+ * Fetch monthly summaries from "Sumary-Mount" table
+ */
+export async function dbFetchMonthlySummaries(startDate?: string, endDate?: string) {
+  try {
+    const tableName = await getTableRef('Sumary-Mount', ['sumary_mount', 'SummaryMonth', 'summary_month']);
+    let query = supabase.from(tableName).select('*');
+    if (startDate) {
+      query = query.eq('StartDate', startDate);
+    }
+    if (endDate) {
+      query = query.eq('EndDate', endDate);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  } catch (err: any) {
+    console.warn('⚡ Supabase Sumary-Mount read warning:', err.message);
+    return null;
   }
 }
 
