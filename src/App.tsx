@@ -31,12 +31,14 @@ import {
 import { 
   BarChart4, FileText, Users, CalendarDays, 
   HelpCircle, Sparkles, CheckSquare, Clock, ArrowRight,
-  Coins, UserCheck, Database, Sliders, CheckCircle2, Sun, Moon
+  Coins, UserCheck, Database, Sliders, CheckCircle2, Sun, Moon,
+  Lock
 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger' | 'employees' | 'holidays' | 'payroll' | 'individual-report' | 'settings' | 'help'>('ledger');
   const [supabaseConnected, setSupabaseConnected] = useState<boolean>(true);
+  const [isEmployeesUnlocked, setIsEmployeesUnlocked] = useState<boolean>(false);
 
   // Theme Toggle: State default to 'light' for comfortable bright UI (สีโทนสว่าง สบายตา)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -669,13 +671,36 @@ export default function App() {
         )}
 
         {activeTab === 'employees' && (
-          <EmployeeManager
-            employees={employees}
-            onAddEmployee={handleAddEmployee}
-            onUpdateEmployee={handleUpdateEmployee}
-            onDeleteEmployee={handleDeleteEmployee}
-            isDark={isDark}
-          />
+          isEmployeesUnlocked ? (
+            <div className="space-y-4">
+              <div className={`p-3 rounded border flex items-center justify-between transition-all duration-200 ${
+                isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-xs font-bold">✓ สิทธิพนักงานเปิดเข้าถึงแก้ไขข้อมูลได้เรียบร้อย (Unlocked)</span>
+                </div>
+                <button
+                  onClick={() => setIsEmployeesUnlocked(false)}
+                  className="bg-red-500 hover:bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-widest px-3 py-1 rounded-sm cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  ล็อคระบบความปลอดภัย / LOCK
+                </button>
+              </div>
+              <EmployeeManager
+                employees={employees}
+                onAddEmployee={handleAddEmployee}
+                onUpdateEmployee={handleUpdateEmployee}
+                onDeleteEmployee={handleDeleteEmployee}
+                isDark={isDark}
+              />
+            </div>
+          ) : (
+            <EmployeePasscodeLock
+              onUnlock={() => setIsEmployeesUnlocked(true)}
+              isDark={isDark}
+            />
+          )
         )}
 
         {activeTab === 'holidays' && (
@@ -714,6 +739,73 @@ export default function App() {
           </p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function EmployeePasscodeLock({ onUnlock, isDark }: { onUnlock: () => void; isDark: boolean }) {
+  const [passcode, setPasscode] = React.useState('');
+  const [error, setError] = React.useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passcode === '43210344') {
+      onUnlock();
+      setError('');
+    } else {
+      setError('❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+    }
+  };
+
+  return (
+    <div className="flex justify-center items-center py-16 px-4">
+      <div className={`w-full max-w-md p-8 rounded-lg border shadow-2xl transition-all duration-200 ${
+        isDark ? 'bg-[#0D0D0D] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800'
+      }`}>
+        <div className="flex flex-col items-center text-center space-y-4">
+          <div className="p-4 bg-amber-500/10 text-[#D4AF37] rounded-full">
+            <Lock className="w-8 h-8 animate-pulse" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold tracking-tight uppercase">ระบบนี้ได้รับการคุ้มครองสิทธิ</h2>
+            <p className="text-[11px] text-gray-400 mt-1">
+              ส่วนของ ทะเบียนพนักงาน จำเป็นต้องใช้รหัสผ่านเฉพาะก่อนเปิดดูและแก้ไขข้อมูล
+            </p>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="w-full space-y-4 pt-4">
+            <div className="space-y-1 text-left">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-gray-400">ป้อนรหัสคีย์ลับพนักงาน (Passcode)</label>
+              <input
+                type="password"
+                value={passcode}
+                onChange={(e) => {
+                  setPasscode(e.target.value);
+                  if (error) setError('');
+                }}
+                placeholder="••••••••"
+                className={`w-full px-4 py-2.5 rounded border text-center font-mono tracking-widest text-lg focus:outline-hidden ${
+                  isDark 
+                    ? 'bg-[#141414] border-white/10 text-white focus:border-[#D4AF37]' 
+                    : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-amber-500'
+                }`}
+                autoFocus
+              />
+            </div>
+
+            {error && (
+              <p className="text-[11px] text-red-500 font-medium">{error}</p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-[#D4AF37] hover:bg-amber-400 active:scale-[0.98] text-black font-bold text-xs uppercase tracking-wider py-3 rounded transition-all cursor-pointer"
+            >
+              ตรวจสอบรหัสผ่าน / UNLOOK REGISTRY
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

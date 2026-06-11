@@ -352,7 +352,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       });
 
       // Add user specified allowances
-      const extraAllowance = allowances[emp.id] || 0;
+      const extraAllowance = 0; // Force other income (กรอกเอง) to 0 always to prevent calculation errors
       const otherDeduction = deductions[emp.id] || 0;
 
       // Withholding Tax & Social Security calculations (Thai Standards)
@@ -587,7 +587,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
             OT15Wage: p.ot15Wage,
             OT20Wage: p.ot20Wage,
             OT30Wage: p.ot30Wage,
-            OtherIncome: allowances[p.id] || 0, // Other Income (กรอกเอง)
+            OtherIncome: 0, // Other Income (กรอกเอง) forced to 0 to prevent calculation errors
             OtherDeductions: p.otherDeduction, // Deduction (กรอกเอง)
             TaxDeduct: p.tax, // หักภาษี 3%
             SocialSecurity: p.sso, // หักประกันสังคม (2569)
@@ -963,14 +963,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                     </td>
 
                     {/* Other Income (กรอกเอง) */}
-                    <td className="py-2 px-3 text-center">
-                      <input
-                        type="number"
-                        placeholder="0"
-                        value={allowances[p.id] !== undefined ? allowances[p.id] : ''}
-                        onChange={(e) => setAllowances({ ...allowances, [p.id]: parseFloat(e.target.value) || 0 })}
-                        className={`w-20 text-[11px] px-1.5 py-1 text-right bg-transparent border rounded-sm focus:outline-hidden ${isDark ? 'border-white/10 text-amber-400 focus:border-[#D4AF37]' : 'border-slate-300 text-amber-700 font-bold focus:border-amber-600'}`}
-                      />
+                    <td className="py-2 px-3 text-center font-mono text-gray-400 dark:text-gray-500 font-bold select-none">
+                      0
                     </td>
 
                     {/* Deduction (Other Deduction กรอกเอง) */}
@@ -1314,12 +1308,25 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
             <div className="bg-white text-black p-6 rounded-xs shadow-sm font-sans space-y-6 border border-gray-300 print:p-0 print:border-0" id="thai-ot-slip-printable-area">
               
               {/* Slip Header banner */}
-              <div className="text-center space-y-1 pb-4 border-b-2 border-black">
-                <h4 className="text-base font-serif uppercase tracking-widest font-extrabold">ใบแจ้งยอดเงินเดือนและค่าตอบแทนทำงานวิชาชีพ</h4>
-                <p className="text-[11px] text-gray-600 font-bold uppercase tracking-wide">IKM TESTING (THAILAND) CO., LTD.</p>
-                <p className="text-[10px] text-gray-500 font-medium font-mono">
-                  รอบประมวลตัดรอบจ่ายประจำช่วงวันที่: <span className="font-bold underline text-black">{startDate}</span> ถึงวันที่ <span className="font-bold underline text-black">{endDate}</span>
-                </p>
+              <div className="flex items-center justify-between pb-4 border-b-2 border-dashed border-black md:flex-row flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <img 
+                    src="https://lh3.googleusercontent.com/d/1HMZ8z-TK8bmpxuA3b4nu2ybopYiz-yGN" 
+                    className="h-9 w-auto object-contain shrink-0" 
+                    alt="IKM Testing Logo" 
+                    referrerPolicy="no-referrer" 
+                  />
+                  <div className="text-left font-sans">
+                    <p className="text-[11.5px] font-black text-black uppercase tracking-wide">IKM Testing (Thailand) Co., Ltd.</p>
+                    <p className="text-[8.5px] text-gray-500 font-medium">155/167 Moo 5. Samnakthon Sub-district, Banchang District, Rayong 21130 Thailand.</p>
+                  </div>
+                </div>
+                <div className="text-right font-sans">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-[#D4AF37]">ใบแจ้งยอดเงินเดือนและค่าตอบแทนทำงาน</h4>
+                  <p className="text-[9px] text-gray-500 font-mono">
+                    ช่วงวันที่ <span className="font-bold underline text-black">{startDate}</span> ถึง <span className="font-bold underline text-black">{endDate}</span>
+                  </p>
+                </div>
               </div>
 
               {/* Employee metadata details info panel */}
@@ -1570,12 +1577,25 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                 style={{ pageBreakAfter: 'always', breakAfter: 'page' }}
               >
                 {/* Slip Header banner */}
-                <div className="text-center space-y-1 pb-4 border-b-2 border-black">
-                  <h4 className="text-md font-serif uppercase tracking-widest font-extrabold text-black">ใบแจ้งยอดเงินเดือนและค่าตอบแทนทำงานวิชาชีพ</h4>
-                  <p className="text-[11.5px] text-gray-700 font-bold uppercase tracking-wide">IKM TESTING (THAILAND) CO., LTD.</p>
-                  <p className="text-[10.5px] text-gray-500 font-medium font-mono">
-                    รอบประมวลตัดรอบจ่ายประจำช่วงวันที่: <span className="font-bold underline text-black">{startDate}</span> ถึงวันที่ <span className="font-bold underline text-black">{endDate}</span>
-                  </p>
+                <div className="flex items-center justify-between pb-4 border-b-2 border-dashed border-black md:flex-row flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <img 
+                      src="https://lh3.googleusercontent.com/d/1HMZ8z-TK8bmpxuA3b4nu2ybopYiz-yGN" 
+                      className="h-9 w-auto object-contain shrink-0" 
+                      alt="IKM Testing Logo" 
+                      referrerPolicy="no-referrer" 
+                    />
+                    <div className="text-left font-sans">
+                      <p className="text-[11.5px] font-black text-black uppercase tracking-wide">IKM Testing (Thailand) Co., Ltd.</p>
+                      <p className="text-[8.5px] text-gray-500 font-medium">155/167 Moo 5. Samnakthon Sub-district, Banchang District, Rayong 21130 Thailand.</p>
+                    </div>
+                  </div>
+                  <div className="text-right font-sans">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#D4AF37]">ใบแจ้งยอดเงินเดือนและค่าตอบแทนทำงาน</h4>
+                    <p className="text-[9px] text-gray-500 font-mono">
+                      ช่วงวันที่ <span className="font-bold underline text-black">{startDate}</span> ถึง <span className="font-bold underline text-black">{endDate}</span>
+                    </p>
+                  </div>
                 </div>
 
                 {/* Employee metadata details info panel */}
@@ -1753,12 +1773,25 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
           <div id="print-root-content" className="w-full flex justify-center pb-20">
             <div className="bg-white text-black p-10 shadow-2xl border border-gray-350 rounded-sm w-full max-w-[297mm] font-sans text-left">
               {/* Header */}
-              <div className="text-center space-y-1.5 pb-5 border-b-2 border-slate-900 mb-6">
-                <h3 className="text-lg font-bold font-serif uppercase tracking-wider text-black">รายงานสรุปแผ่นจ่ายเงินเดือนและโอทีระดับบุคคล (Payroll Core Matrix)</h3>
-                <p className="text-xs text-gray-650 font-bold uppercase tracking-wide">IKM TESTING (THAILAND) CO., LTD.</p>
-                <p className="text-xs text-gray-550 font-medium">
-                  ประจำรอบตัดจ่ายช่วงวันที่: <span className="font-bold underline text-black">{startDate}</span> ถึงวันที่ <span className="font-bold underline text-black">{endDate}</span>
-                </p>
+              <div className="flex items-center justify-between pb-5 border-b-2 border-slate-900 mb-6 md:flex-row flex-col gap-4">
+                <div className="flex items-center gap-3">
+                  <img 
+                    src="https://lh3.googleusercontent.com/d/1HMZ8z-TK8bmpxuA3b4nu2ybopYiz-yGN" 
+                    className="h-11 w-auto object-contain shrink-0" 
+                    alt="IKM Testing Logo" 
+                    referrerPolicy="no-referrer" 
+                  />
+                  <div className="text-left font-sans">
+                    <p className="text-sm font-black text-black uppercase tracking-wide">IKM Testing (Thailand) Co., Ltd.</p>
+                    <p className="text-[9px] text-gray-500 font-medium">155/167 Moo 5. Samnakthon Sub-district, Banchang District, Rayong 21130 Thailand.</p>
+                  </div>
+                </div>
+                <div className="text-right font-sans md:max-w-md">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-black">รายงานสรุปแผ่นจ่ายเงินเดือนและโอทีระดับบุคคล (Payroll Core Matrix)</h3>
+                  <p className="text-[10px] text-gray-500">
+                    ประจำรอบตัดจ่ายช่วงวันที่: <span className="font-bold underline text-black">{startDate}</span> ถึงวันที่ <span className="font-bold underline text-black">{endDate}</span>
+                  </p>
+                </div>
               </div>
 
               {/* Table */}

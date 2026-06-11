@@ -1712,13 +1712,15 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
               
               {/* Logo block (IKM Testing Left aligned) */}
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-black text-white font-extrabold flex flex-col justify-center items-center rounded-xs shrink-0 tracking-tighter" style={{ fontFamily: 'monospace' }}>
-                  <div className="text-[14px] leading-3 font-black">I K M</div>
-                  <div className="text-[7px] border-t border-white/50 px-0.5 mt-1">TESTING</div>
-                </div>
+                <img 
+                  src="https://lh3.googleusercontent.com/d/1HMZ8z-TK8bmpxuA3b4nu2ybopYiz-yGN" 
+                  className="h-10 w-auto object-contain shrink-0" 
+                  alt="IKM Testing Logo" 
+                  referrerPolicy="no-referrer" 
+                />
                 <div className="text-left">
-                  <h1 className="text-sm font-black tracking-wider uppercase font-sans">IKM TESTING (THAILAND) CO., LTD.</h1>
-                  <p className="text-[9px] text-slate-500 leading-tight">OFFICIAL REPRESENTATIVE IN KINGDOM OF THAILAND</p>
+                  <h1 className="text-sm font-black tracking-wider uppercase font-sans text-black">IKM Testing (Thailand) Co., Ltd.</h1>
+                  <p className="text-[9.5px] text-slate-500 leading-tight">155/167 Moo 5. Samnakthon Sub-district, Banchang District, Rayong 21130 Thailand.</p>
                 </div>
               </div>
 
@@ -1814,7 +1816,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                     <th className="py-2 px-1 text-[9px] w-[75px]" rowSpan={2}>Perdiem<br/><span className="text-[7.5px] font-sans">/ Travel Exp</span></th>
                     <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Advance</th>
                     <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Job Bonus</th>
-                    <th className="py-2.5 px-2 w-[150px]" rowSpan={2}>Remark</th>
+                    <th className="py-2.5 px-2 w-[150px]" rowSpan={2}>Job Reference / Remark</th>
                   </tr>
                   <tr className="divide-x divide-slate-450 divide-slate-400 text-[9.5px]">
                     <th className="py-1 px-1 w-[48px] font-mono">Start</th>
@@ -2029,7 +2031,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                           <div className="flex items-center gap-1.5 justify-between">
                             <input
                               type="text"
-                              placeholder="——"
+                              placeholder="เช่น Workshop, Job XXX-XX..."
                               value={finalRemark}
                               onChange={(e) => handleSupplementChange(suppKey, 'remarkOverride', e.target.value)}
                               className="flex-1 text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-305 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-600 text-[10px] italic truncate print:border-none print:p-0"
@@ -2295,39 +2297,26 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
             
             {/* Header Identity Block matching IKM header */}
             <div className="flex justify-between items-start border-b border-slate-950 pb-5 mb-5 md:flex-row flex-col gap-4">
-              <div className="space-y-1.5 flex-1">
-                <div className="text-[10px] font-extrabold text-[#D4AF37] tracking-wider uppercase">COMPANY REVENUE BREAKDOWN REPORT</div>
-                <h1 className="text-sm md:text-base font-serif font-black tracking-wide text-black uppercase leading-tight">
-                  IKM TESTING & ENGINEERING (THAILAND) CO., LTD.
-                </h1>
-                <p className="text-[9px] text-slate-500 font-medium leading-relaxed font-mono">
-                  7 Moo 4, Phala-Banchang Road, Phala Sub-district, Banchang District, Rayong 21130 Thailand
-                </p>
-                <div className="pt-2">
-                  <span className="bg-[#D4AF37] text-black font-extrabold px-2 py-0.5 text-[8.5px] uppercase tracking-wider rounded-xs select-none">
-                    DAILY EARNINGS SHEET
-                  </span>
-                </div>
-              </div>
-              
-              <div className="w-full md:w-[260px] space-y-1 text-[9.5px] font-bold text-slate-500 uppercase tracking-tight font-mono">
-                <div className="flex items-end gap-1.5">
-                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">WAGES Basis :</span>
-                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-extrabold text-slate-900 pl-1">
-                    THB {((activeEmployee?.workshopRate || settings.defaultDailyWage || 700)).toLocaleString()} / Day
-                  </span>
-                </div>
-                <div className="flex items-end gap-1.5">
-                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Date Range :</span>
-                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-extrabold text-slate-900 pl-1 text-[9px]">
-                    {startDate.split('-').reverse().join('/')} - {endDate.split('-').reverse().join('/')}
-                  </span>
-                </div>
-                <div className="flex items-end gap-1.5">
-                  <span className="font-extrabold text-slate-500 uppercase tracking-wider w-28 shrink-0">Hourly Rate :</span>
-                  <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-mono font-extrabold text-slate-900 pl-1">
-                    THB {hourlyRate.toLocaleString()} / Hour
-                  </span>
+              <div className="flex items-start gap-4 flex-1">
+                <img 
+                  src="https://lh3.googleusercontent.com/d/1HMZ8z-TK8bmpxuA3b4nu2ybopYiz-yGN" 
+                  className="h-12 w-auto object-contain shrink-0 mt-1" 
+                  alt="IKM Testing Logo" 
+                  referrerPolicy="no-referrer" 
+                />
+                <div className="space-y-1">
+                  <div className="text-[10px] font-extrabold text-[#D4AF37] tracking-wider uppercase">COMPANY REVENUE BREAKDOWN REPORT</div>
+                  <h1 className="text-sm md:text-base font-serif font-black tracking-wide text-black uppercase leading-tight">
+                    IKM Testing (Thailand) Co., Ltd.
+                  </h1>
+                  <p className="text-[9px] text-slate-500 font-medium leading-relaxed font-mono">
+                    155/167 Moo 5. Samnakthon Sub-district, Banchang District, Rayong 21130 Thailand.
+                  </p>
+                  <div className="pt-1">
+                    <span className="bg-[#D4AF37] text-black font-extrabold px-2 py-0.5 text-[8.5px] uppercase tracking-wider rounded-xs select-none">
+                      DAILY EARNINGS SHEET
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2366,7 +2355,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                     <th className="py-2 px-1 w-[80px] text-pink-750">Incentive</th>
                     <th className="py-2 px-1 w-[80px] text-amber-750">Perdiem</th>
                     <th className="py-2 px-1 w-[125px] text-emerald-950 font-black bg-emerald-50">รวมค่าแรง + โอที + สวัสดิการ (บาท)</th>
-                    <th className="py-2 px-1 w-[110px]">หมายเหตุ (Remark)</th>
+                    <th className="py-2 px-1 w-[110px]">ชื่อ Job / หมายเหตุ (Job Reference)</th>
                   </tr>
                 </thead>
 
@@ -2527,7 +2516,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                         <td className="py-0.5 px-1 text-left">
                           <input
                             type="text"
-                            placeholder="——"
+                            placeholder="เช่น Workshop, Job XXX-XX..."
                             value={finalRemark}
                             onChange={(e) => handleSupplementChange(suppKey, 'remarkOverride', e.target.value)}
                             className="w-full text-left p-0.5 bg-transparent border-0 border-b border-transparent hover:border-slate-350 focus:border-[#D4AF37] focus:outline-hidden font-medium text-slate-700 text-[10px] italic truncate print:border-none print:p-0"
@@ -2802,13 +2791,15 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
               {/* SHEET HEADER LAYOUT */}
               <div className="flex justify-between items-start border-b-2 border-slate-800 pb-2 mb-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 bg-black text-white font-extrabold flex flex-col justify-center items-center rounded-xs shrink-0 tracking-tighter" style={{ fontFamily: 'monospace' }}>
-                    <div className="text-[11px] leading-3 font-black">I K M</div>
-                    <div className="text-[5.5px] border-t border-white/50 px-0.5 mt-0.5">TESTING</div>
-                  </div>
+                  <img 
+                    src="https://lh3.googleusercontent.com/d/1HMZ8z-TK8bmpxuA3b4nu2ybopYiz-yGN" 
+                    className="h-8 w-auto object-contain shrink-0" 
+                    alt="IKM Testing Logo" 
+                    referrerPolicy="no-referrer" 
+                  />
                   <div className="text-left">
-                    <h1 className="text-[11px] font-black tracking-wider uppercase font-sans text-black">IKM TESTING (THAILAND) CO., LTD.</h1>
-                    <p className="text-[6.5px] text-slate-500 leading-tight font-bold">OFFICIAL REPRESENTATIVE IN KINGDOM OF THAILAND</p>
+                    <h1 className="text-[11px] font-black tracking-wider uppercase font-sans text-black">IKM Testing (Thailand) Co., Ltd.</h1>
+                    <p className="text-[7.5px] text-slate-500 leading-tight font-bold">155/167 Moo 5. Samnakthon Sub-district, Banchang District, Rayong 21130 Thailand.</p>
                   </div>
                 </div>
 
@@ -2884,7 +2875,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       <th className="py-1 px-0.5 text-[7.5px] w-[45px]" rowSpan={2}>Perdiem</th>
                       <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Advance</th>
                       <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Job Bonus</th>
-                      <th className="py-1 px-1 w-[80px]" rowSpan={2}>Remark</th>
+                      <th className="py-1 px-1 w-[80px]" rowSpan={2}>Job Ref</th>
                     </tr>
                     <tr className="divide-x divide-slate-400 font-sans text-[7.5px] select-none text-slate-800">
                       <th className="py-0.5 px-0.5 w-[30px] font-mono">Start</th>

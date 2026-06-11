@@ -849,10 +849,10 @@ export default function TimesheetTable({
                 <input
                   id="add-entry-remark-input"
                   type="text"
-                  placeholder="หมายเหตุเพิ่มเติม..."
+                  placeholder="ระบุชื่อ Job หรือ Job reference เช่น Workshop, Job XXX-XX..."
                   value={newEntry.remark}
                   onChange={(e) => setNewEntry({ ...newEntry, remark: e.target.value })}
-                  className="text-xs bg-[#0D0D0D] border border-white/10 text-white rounded-sm px-2.5 py-1.5 w-64 focus:outline-hidden focus:border-[#D4AF37]"
+                  className="text-xs bg-[#0D0D0D] border border-white/10 text-white rounded-sm px-2.5 py-1.5 w-72 focus:outline-hidden focus:border-[#D4AF37]"
                 />
               </div>
             </div>
@@ -897,7 +897,7 @@ export default function TimesheetTable({
                 <th className="py-2.5 px-3 text-right bg-rose-50 dark:bg-red-950/25 text-rose-600 dark:text-red-400 border-r border-[#bdc1c6] dark:border-[#2d2f34] font-bold">OT 2.0</th>
                 <th className="py-2.5 px-3 text-right bg-purple-50 dark:bg-purple-950/25 text-purple-600 dark:text-purple-400 border-r border-[#bdc1c6] dark:border-[#2d2f34] font-bold">OT 3.0</th>
                 <th className="py-2.5 px-3 text-center w-25 border-r border-[#bdc1c6] dark:border-[#2d2f34] font-bold text-sky-600 dark:text-sky-400">รีวิว</th>
-                <th className="py-2.5 px-3 border-r border-[#bdc1c6] dark:border-[#2d2f34] text-left font-bold">หมายเหตุ</th>
+                <th className="py-2.5 px-3 border-r border-[#bdc1c6] dark:border-[#2d2f34] text-left font-bold">ชื่อ Job / หมายเหตุกิจกรรม (Job Reference)</th>
                 <th className="py-2.5 px-3 w-24 text-center font-bold">จัดการ</th>
               </tr>
             </thead>
