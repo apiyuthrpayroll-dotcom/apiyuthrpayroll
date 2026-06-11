@@ -398,6 +398,10 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         ot20Wage: Number(ot20Pay.toFixed(2)),
         ot30Wage: Number(ot30Pay.toFixed(2)),
         extraAllowance: extraAllowance + totalConfineSpace + totalIncentive + totalPerdiem, // Add supplements to shown extra allowances
+        manualOtherIncome: extraAllowance,
+        totalConfineSpace,
+        totalIncentive,
+        totalPerdiem,
         otherDeduction,
         sso: ssoDeduction,
         tax: calculatedTax,
@@ -1355,9 +1359,27 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                     </div>
                   )}
                   <div className="p-1 px-3 flex justify-between bg-amber-50/50">
-                    <span>รายรับอื่น / Other Income</span>
-                    <strong>{activeSlip.extraAllowance.toLocaleString()}</strong>
+                    <span className="font-semibold text-amber-900">รายรับอื่น (กรอกเอง) / Other Income</span>
+                    <strong>{activeSlip.manualOtherIncome.toLocaleString()}</strong>
                   </div>
+                  {activeSlip.totalPerdiem > 0 && (
+                    <div className="p-1 px-3 flex justify-between text-indigo-700">
+                      <span>ค่าเบี้ยเลี้ยงสะสม / Perdiem</span>
+                      <strong>{activeSlip.totalPerdiem.toLocaleString()}</strong>
+                    </div>
+                  )}
+                  {activeSlip.totalConfineSpace > 0 && (
+                    <div className="p-1 px-3 flex justify-between text-orange-700">
+                      <span>ค่าพื้นที่อับอากาศ / Confine Space</span>
+                      <strong>{activeSlip.totalConfineSpace.toLocaleString()}</strong>
+                    </div>
+                  )}
+                  {activeSlip.totalIncentive > 0 && (
+                    <div className="p-1 px-3 flex justify-between text-emerald-700">
+                      <span>เบี้ยขยันพนักงาน / Incentive</span>
+                      <strong>{activeSlip.totalIncentive.toLocaleString()}</strong>
+                    </div>
+                  )}
 
                   <div className="p-1.5 bg-gray-150 text-right font-extrabold border-t border-gray-450 flex justify-between">
                     <span>รายได้รวม (Gross)</span>
@@ -1593,9 +1615,27 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       </div>
                     )}
                     <div className="p-1 px-3 flex justify-between bg-amber-50/50 text-black">
-                      <span>รายรับอื่น / Other Income</span>
-                      <strong>{empSlip.extraAllowance.toLocaleString()}</strong>
+                      <span className="font-semibold text-amber-900">รายรับอื่น (กรอกเอง) / Other Income</span>
+                      <strong>{empSlip.manualOtherIncome.toLocaleString()}</strong>
                     </div>
+                    {empSlip.totalPerdiem > 0 && (
+                      <div className="p-1 px-3 flex justify-between text-black">
+                        <span>ค่าเบี้ยเลี้ยงสะสม / Perdiem</span>
+                        <strong>{empSlip.totalPerdiem.toLocaleString()}</strong>
+                      </div>
+                    )}
+                    {empSlip.totalConfineSpace > 0 && (
+                      <div className="p-1 px-3 flex justify-between text-black">
+                        <span>ค่าพื้นที่อับอากาศ / Confine Space</span>
+                        <strong>{empSlip.totalConfineSpace.toLocaleString()}</strong>
+                      </div>
+                    )}
+                    {empSlip.totalIncentive > 0 && (
+                      <div className="p-1 px-3 flex justify-between text-black">
+                        <span>เบี้ยขยันพนักงาน / Incentive</span>
+                        <strong>{empSlip.totalIncentive.toLocaleString()}</strong>
+                      </div>
+                    )}
 
                     <div className="p-1.5 bg-gray-150 text-right font-extrabold border-t border-gray-450 flex justify-between text-black mt-auto">
                       <span>รายได้รวม (Gross)</span>

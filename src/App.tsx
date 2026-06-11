@@ -404,8 +404,8 @@ export default function App() {
   };
 
   const handleClearAllEntries = async () => {
+    // เคลียร์ค่าเฉพาะภายในหน้าเว็บเท่านั้นโดยไม่ลบข้อมูลออกจากฐานข้อมูล (Supabase)
     updateEntriesAndSync([]);
-    await dbClearAllTimesheets();
   };
 
   const isDark = theme === 'dark';
@@ -497,6 +497,19 @@ export default function App() {
               </button>
 
               <button
+                id="tab-individual-report"
+                onClick={() => setActiveTab('individual-report')}
+                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'individual-report'
+                    ? 'bg-[#D4AF37] text-black shadow-md'
+                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
+                }`}
+              >
+                <UserCheck className="w-4 h-4" />
+                รายงานเวลาพนักงานเดี่ยว (NEW)
+              </button>
+
+              <button
                 id="tab-payroll"
                 onClick={() => setActiveTab('payroll')}
                 className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
@@ -520,19 +533,6 @@ export default function App() {
               >
                 <Users className="w-4 h-4" />
                 ทะเบียนรายชื่อพนักงาน
-              </button>
-
-              <button
-                id="tab-individual-report"
-                onClick={() => setActiveTab('individual-report')}
-                className={`py-2 px-4 rounded-sm text-xs uppercase tracking-wider font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                  activeTab === 'individual-report'
-                    ? 'bg-[#D4AF37] text-black shadow-md'
-                    : isDark ? 'text-gray-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
-                }`}
-              >
-                <UserCheck className="w-4 h-4" />
-                รายงานเวลาพนักงานเดี่ยว (NEW)
               </button>
 
               <button
