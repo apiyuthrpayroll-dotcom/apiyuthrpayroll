@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { TimesheetEntry, Employee, Holiday } from '../types';
-import { calculateEntryOT, getDayOfWeek, isHoliday } from '../utils/calculator';
+import { calculateEntryOT, getDayOfWeek, isHoliday, formatThaiDate } from '../utils/calculator';
 import { 
   FileSpreadsheet, Plus, Trash2, Edit2, Check, X, FileUp, 
   Download, Filter, Search, Eye, AlertCircle, RefreshCw, BookmarkCheck
@@ -62,6 +62,10 @@ export default function TimesheetTable({
   const [employeeFilter, setEmployeeFilter] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
+  const [startTimeFilter, setStartTimeFilter] = useState('');
+  const [endTimeFilter, setEndTimeFilter] = useState('');
 
   // Google Sheets Style configurations for both Light / Dark theme toggles
   const sheetStyles = useMemo(() => {
@@ -133,9 +137,13 @@ export default function TimesheetTable({
         e.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.remark.toLowerCase().includes(searchQuery.toLowerCase())
       ) : true;
-      return matchEmp && matchProj && matchSearch;
+      const matchStartDate = startDateFilter ? e.date >= startDateFilter : true;
+      const matchEndDate = endDateFilter ? e.date <= endDateFilter : true;
+      const matchStartTime = startTimeFilter ? e.timeIn >= startTimeFilter : true;
+      const matchEndTime = endTimeFilter ? e.timeOut <= endTimeFilter : true;
+      return matchEmp && matchProj && matchSearch && matchStartDate && matchEndDate && matchStartTime && matchEndTime;
     });
-  }, [entries, employeeFilter, projectFilter, searchQuery]);
+  }, [entries, employeeFilter, projectFilter, searchQuery, startDateFilter, endDateFilter, startTimeFilter, endTimeFilter]);
 
   // Project List for filtering
   const allProjects = useMemo(() => {
@@ -548,8 +556,8 @@ export default function TimesheetTable({
   return (
     <div className="space-y-4">
       {/* Search & Actions Panel */}
-      <div className="bg-[#0D0D0D] border border-white/10 rounded p-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-[#0D0D0D] border border-white/10 rounded p-4 space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <Search className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -589,13 +597,17 @@ export default function TimesheetTable({
               ))}
             </select>
 
-            {(employeeFilter || projectFilter || searchQuery) && (
+            {(employeeFilter || projectFilter || searchQuery || startDateFilter || endDateFilter || startTimeFilter || endTimeFilter) && (
               <button
                 id="clear-filters-btn"
                 onClick={() => {
                   setEmployeeFilter('');
                   setProjectFilter('');
                   setSearchQuery('');
+                  setStartDateFilter('');
+                  setEndDateFilter('');
+                  setStartTimeFilter('');
+                  setEndTimeFilter('');
                 }}
                 className="text-xs text-red-400 font-medium hover:text-red-300 hover:underline flex items-center gap-1 cursor-pointer"
               >
@@ -656,6 +668,64 @@ export default function TimesheetTable({
               เคลียร์ข้อมูลทั้งหมด
             </button>
           </div>
+        </div>
+
+        {/* Date & Time Range Filters Row */}
+        <div className="pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-4 text-[11px] text-gray-300">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[#D4AF37] font-semibold uppercase tracking-wider text-[10px]">ช่วงวันที่:</span>
+            <input
+              id="filter-start-date"
+              type="date"
+              value={startDateFilter}
+              onChange={(e) => setStartDateFilter(e.target.value)}
+              className="bg-[#141414] border border-white/10 text-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-hidden focus:border-[#D4AF37] max-w-[125px]"
+            />
+            <span className="text-gray-500">ถึง</span>
+            <input
+              id="filter-end-date"
+              type="date"
+              value={endDateFilter}
+              onChange={(e) => setEndDateFilter(e.target.value)}
+              className="bg-[#141414] border border-white/10 text-gray-200 rounded px-1.5 py-0.5 text-xs focus:outline-hidden focus:border-[#D4AF37] max-w-[125px]"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[#D4AF37] font-semibold uppercase tracking-wider text-[10px]">ช่วงเวลาทำงาน:</span>
+            <span className="text-gray-500 text-[10px] font-mono">เข้าตั้งเเต่ (Time In ≥)</span>
+            <input
+              id="filter-start-time"
+              type="time"
+              value={startTimeFilter}
+              onChange={(e) => setStartTimeFilter(e.target.value)}
+              className="bg-[#141414] border border-white/10 text-gray-200 rounded px-1.5 py-0.5 text-xs w-20 focus:outline-hidden focus:border-[#D4AF37]"
+            />
+            <span className="text-gray-500 text-[10px] font-mono font-bold">|</span>
+            <span className="text-gray-500 text-[10px] font-mono">ออกไม่เกิน (Time Out ≤)</span>
+            <input
+              id="filter-end-time"
+              type="time"
+              value={endTimeFilter}
+              onChange={(e) => setEndTimeFilter(e.target.value)}
+              className="bg-[#141414] border border-white/10 text-gray-200 rounded px-1.5 py-0.5 text-xs w-20 focus:outline-hidden focus:border-[#D4AF37]"
+            />
+          </div>
+
+          {(startDateFilter || endDateFilter || startTimeFilter || endTimeFilter) && (
+            <button
+              id="clear-range-filters-btn"
+              onClick={() => {
+                setStartDateFilter('');
+                setEndDateFilter('');
+                setStartTimeFilter('');
+                setEndTimeFilter('');
+              }}
+              className="text-[#D4AF37] hover:text-yellow-400 font-bold cursor-pointer text-[10.5px] uppercase tracking-wider underline ml-auto transition-colors"
+            >
+              ล้างค่าช่วงเวลา (Reset Ranges)
+            </button>
+          )}
         </div>
       </div>
 
@@ -895,7 +965,7 @@ export default function TimesheetTable({
                             className="bg-white dark:bg-[#0D0D0D] border border-slate-300 dark:border-white/15 text-slate-800 dark:text-white rounded px-1.5 py-0.5 text-xs font-mono"
                           />
                         ) : (
-                          e.date
+                          formatThaiDate(e.date)
                         )}
                       </td>
 

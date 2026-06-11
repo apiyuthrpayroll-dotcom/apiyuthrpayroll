@@ -5,7 +5,7 @@ import {
   Users, Calendar, Clock, Filter, Printer, Download, Save,
   Search, FileSpreadsheet, ChevronRight, CheckCircle, Info, ArrowRight, UserCheck, RefreshCw, Plus, Check, Database, Trash2
 } from 'lucide-react';
-import { calculateEntryOT } from '../utils/calculator';
+import { calculateEntryOT, formatThaiDate } from '../utils/calculator';
 import { dbFetchSupplements, dbSaveSupplements } from '../lib/supabaseClient';
 
 interface IndividualReportProps {
@@ -1808,7 +1808,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                 <thead className="bg-slate-100 text-slate-700 text-[10px] uppercase font-bold text-center border-b border-slate-400 font-mono tracking-tight">
                   <tr className="border-b border-slate-400 divide-x divide-slate-400">
                     <th className="py-2.5 px-1.5 w-[100px] shrink-0" rowSpan={2}>Day</th>
-                    <th className="py-2.5 px-0.5 w-[45px] shrink-0" rowSpan={2}>Date</th>
+                    <th className="py-2.5 px-0.5 w-[65px] shrink-0" rowSpan={2}>Date</th>
                     <th className="py-1.5 px-1 uppercase tracking-wider text-[9px] bg-slate-50" colSpan={3}>Working Time</th>
                     <th className="py-1.5 px-1 uppercase tracking-wider text-[9px] bg-slate-50" colSpan={4}>Overtime</th>
                     <th className="py-2 px-1 text-[9px] w-[75px]" rowSpan={2}>Perdiem<br/><span className="text-[7.5px] font-sans">/ Travel Exp</span></th>
@@ -1909,8 +1909,8 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                         {/* Date Number */}
                         {isFirstRowOfDay ? (
-                          <td className="py-1 px-0.5 font-bold font-mono" rowSpan={dayRows.length}>
-                            {dayNum}
+                          <td className="py-1 px-0.5 font-bold font-mono text-center" rowSpan={dayRows.length}>
+                            {formatThaiDate(dStr)}
                           </td>
                         ) : null}
 
@@ -2358,7 +2358,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                 <thead className="bg-slate-100 text-slate-700 text-[10px] uppercase font-bold text-center border-b border-slate-400 font-mono tracking-tight">
                   <tr className="divide-x divide-slate-400 text-[9.5px]">
                     <th className="py-2 px-1.5 w-[110px] shrink-0">วัน (Day)</th>
-                    <th className="py-2 px-0.5 w-[50px] shrink-0">วันที่ (Date)</th>
+                    <th className="py-2 px-0.5 w-[65px] shrink-0">วันที่ (Date)</th>
                     <th className="py-2 px-1 w-[90px] text-sky-850">ค่าแรงทำงานวันปกติ (บาท)</th>
                     <th className="py-2 px-1 w-[90px] text-emerald-850">รวมโอที (บาท)</th>
                     <th className="py-2 px-1 w-[110px] text-slate-900 font-extrabold bg-slate-50">รวมค่าแรง + โอที (บาท)</th>
@@ -2462,8 +2462,8 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                         {/* Date Number */}
                         {isFirstRowOfDay ? (
-                          <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-800" rowSpan={dayRows.length}>
-                            {dayNum}
+                          <td className="py-1 px-0.5 font-mono text-center font-bold text-slate-800 text-[10.5px]" rowSpan={dayRows.length}>
+                            {formatThaiDate(dStr)}
                           </td>
                         ) : null}
 

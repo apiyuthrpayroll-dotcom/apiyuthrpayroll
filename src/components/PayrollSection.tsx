@@ -6,6 +6,7 @@ import {
   Printer, ArrowRight, Save, Coins, ShieldCheck
 } from 'lucide-react';
 import { supabase, dbSaveMonthlySummary, dbSaveRateCalculation, dbFetchSupplements, dbSaveSupplements, dbFetchMonthlySummaries, stringToUUID } from '../lib/supabaseClient';
+import { formatThaiDate } from '../utils/calculator';
 
 interface PayrollSectionProps {
   employees: Employee[];
@@ -1178,7 +1179,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                 {filteredDailyEarnings.length > 0 ? (
                   filteredDailyEarnings.map((d, idx) => (
                     <tr key={idx} className={`${tableTrStyle} transition-colors text-[11px]`}>
-                      <td className="py-2 px-3 font-mono text-gray-500 whitespace-nowrap">{d.date}</td>
+                      <td className="py-2 px-3 font-mono text-gray-500 whitespace-nowrap">{formatThaiDate(d.date)}</td>
                       <td className="py-2 px-3 font-mono text-gray-500">{d.employeeId}</td>
                       <td className={`py-2 px-3 font-bold ${isDark ? 'text-white' : 'text-slate-850'}`}>{d.employeeName}</td>
                       <td className="py-2 px-3 font-bold">

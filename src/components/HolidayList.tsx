@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Holiday } from '../types';
 import { CalendarPlus, ShieldAlert, Trash2, Pencil, Check, X } from 'lucide-react';
+import { formatThaiDate } from '../utils/calculator';
 
 interface HolidayListProps {
   holidays: Holiday[];
@@ -140,7 +141,7 @@ export default function HolidayList({ holidays, onAddHoliday, onDeleteHoliday, o
                             className="w-full text-[11px] font-mono px-1.5 py-0.5 bg-slate-50 dark:bg-[#0d0d0d] border border-slate-300 dark:border-white/10 rounded-sm text-slate-800 dark:text-white focus:outline-hidden focus:border-amber-500"
                           />
                         ) : (
-                          <span className="font-bold">{hol.holidayDate}</span>
+                          <span className="font-bold">{formatThaiDate(hol.holidayDate)}</span>
                         )}
                       </td>
                       

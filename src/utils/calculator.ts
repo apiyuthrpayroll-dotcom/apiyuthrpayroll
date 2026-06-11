@@ -20,6 +20,37 @@ export function formatDecimalToTime(decimal: number): string {
   return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
+export function formatThaiDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const parts = dateStr.trim().split('-');
+  if (parts.length !== 3) {
+    const slashParts = dateStr.trim().split('/');
+    if (slashParts.length === 3) {
+      let year = parseInt(slashParts[0], 10);
+      if (!isNaN(year) && year > 1000) {
+        const month = slashParts[1];
+        const day = slashParts[2];
+        const beTwoDigits = String((year + 543) % 100).padStart(2, '0');
+        return `${day}/${month}/${beTwoDigits}`;
+      }
+      year = parseInt(slashParts[2], 10);
+      if (!isNaN(year) && year > 1000) {
+        const month = slashParts[1];
+        const day = slashParts[0];
+        const beTwoDigits = String((year + 543) % 100).padStart(2, '0');
+        return `${day}/${month}/${beTwoDigits}`;
+      }
+    }
+    return dateStr;
+  }
+  const year = parseInt(parts[0], 10);
+  const month = parts[1];
+  const day = parts[2];
+  if (isNaN(year)) return dateStr;
+  const beTwoDigits = String((year + 543) % 100).padStart(2, '0');
+  return `${day}/${month}/${beTwoDigits}`;
+}
+
 export function isHoliday(dateStr: string, holidays: Holiday[]): { check: boolean; name: string } {
   if (!dateStr) return { check: false, name: '' };
   const targetDate = dateStr.trim();
