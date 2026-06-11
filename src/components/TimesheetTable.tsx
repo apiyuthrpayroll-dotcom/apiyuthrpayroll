@@ -178,7 +178,7 @@ export default function TimesheetTable({
       newEntry.lunchOT || 0,
       isFlat,
       holidays,
-      newEntry.project || 'workshop',
+      newEntry.project || '',
       matchedEmp?.workScheduleType,
       matchedEmp?.position
     );
@@ -187,7 +187,7 @@ export default function TimesheetTable({
       id: generateKeyUUID(),
       employeeName: newEntry.employeeName,
       date: newEntry.date,
-      project: newEntry.project || 'workshop',
+      project: newEntry.project || '',
       timeIn: newEntry.timeIn,
       timeOut: newEntry.timeOut,
       lunchDeduct: newEntry.lunchDeduct ?? 1,
@@ -239,7 +239,7 @@ export default function TimesheetTable({
       editingEntry.lunchOT ?? 0,
       isFlat,
       holidays,
-      editingEntry.project || 'workshop',
+      editingEntry.project || '',
       matchedEmp?.workScheduleType,
       matchedEmp?.position
     );
@@ -308,7 +308,7 @@ export default function TimesheetTable({
 
         let empName = '';
         let dateStr = '';
-        let project = 'workshop';
+        let project = '';
         let timeIn = '';
         let timeOut = '';
         let lunchOT = 0;
@@ -323,7 +323,7 @@ export default function TimesheetTable({
         if (isWeekdayFirst && hasDateSecondClass && cols.length >= 8) {
           dateStr = cols[1];
           empName = cols[3];
-          project = cols[5] || 'workshop';
+          project = cols[5] || '';
           timeIn = cols[7];
           timeOut = cols[8];
 
@@ -351,7 +351,7 @@ export default function TimesheetTable({
           if (firstColIsNumber && cols.length >= 6) {
             empName = cols[1] || '';
             dateStr = cols[2] || '';
-            project = cols[3] || 'workshop';
+            project = cols[3] || '';
             timeIn = cols[4] || '';
             timeOut = cols[5] || '';
             
@@ -364,7 +364,7 @@ export default function TimesheetTable({
             // No ID index in first column: ชื่อพนักงาน | วันที่ | งาน | เวลาIn | เวลาOut | คีย์(ช่วงพักคีย์ 1)
             empName = cols[0] || '';
             dateStr = cols[1] || '';
-            project = cols[2] || 'workshop';
+            project = cols[2] || '';
             timeIn = cols[3] || '';
             timeOut = cols[4] || '';
             
@@ -378,7 +378,7 @@ export default function TimesheetTable({
           // Fallback minimal mappings
           empName = cols[0] || '';
           dateStr = cols[1] || '';
-          project = cols[2] || 'workshop';
+          project = cols[2] || '';
         }
 
         // Normalize date (converts e.g., 21-03-26 or 23/03/2026 to YYYY-MM-DD or parse correctly)
@@ -458,7 +458,7 @@ export default function TimesheetTable({
           id: generateKeyUUID(),
           employeeName: matchedEmp ? matchedEmp.employeeName : empName.toUpperCase(),
           date: dateStr,
-          project: project || 'workshop',
+          project: project || '',
           timeIn: standardTimeIn,
           timeOut: standardTimeOut,
           lunchDeduct,
@@ -994,7 +994,7 @@ export default function TimesheetTable({
                           />
                         ) : (
                           <span className="font-mono bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-gray-450 px-1.5 py-0.5 rounded text-[10px]">
-                            {e.project || 'workshop'}
+                            {e.project && e.project.toLowerCase() !== 'workshop' ? e.project : ''}
                           </span>
                         )}
                       </td>

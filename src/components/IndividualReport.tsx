@@ -78,7 +78,7 @@ export default function IndividualReport({
   const [positionInput, setPositionInput] = useState<string>('');
   const [locationInput, setLocationInput] = useState<string>('IKM Office');
   const [employeeCodeInput, setEmployeeCodeInput] = useState<string>('');
-  const [projectInput, setProjectInput] = useState<string>('workshop');
+  const [projectInput, setProjectInput] = useState<string>('');
   
   // Signature custom editable input states
   const [issuedByInput, setIssuedByInput] = useState<string>('Ananta S.');
@@ -273,7 +273,7 @@ export default function IndividualReport({
           id: `draft-${dStr}`,
           employeeName: selectedEmpName,
           date: dStr,
-          project: projectInput || 'workshop',
+          project: projectInput || '',
           timeIn: '',
           timeOut: '',
           lunchDeduct: 1,
@@ -371,7 +371,7 @@ export default function IndividualReport({
           Number(updated.lunchOT ?? 0),
           activeEmployee?.isFlatRate || false,
           holidays,
-          updated.project || projectInput || 'workshop',
+          updated.project || projectInput || '',
           activeEmployee?.workScheduleType,
           activeEmployee?.position
         );
@@ -420,7 +420,7 @@ export default function IndividualReport({
           id: newId,
           employeeName: selectedEmpName,
           date: dStr,
-          project: projectInput || 'workshop',
+          project: projectInput || '',
           timeIn: '',
           timeOut: '',
           lunchDeduct: 1,
@@ -504,7 +504,7 @@ export default function IndividualReport({
               id: `ID-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
               employeeName: selectedEmpName,
               date: dStr,
-              project: draft.project || projectInput || 'workshop',
+              project: draft.project || projectInput || '',
               timeIn: draft.timeIn || '08:00',
               timeOut: draft.timeOut || '17:00',
               lunchDeduct: Number(draft.lunchDeduct ?? 1),
@@ -687,7 +687,7 @@ export default function IndividualReport({
             id: `draft-${dStr}`,
             employeeName: selectedEmpName,
             date: dStr,
-            project: projectInput || 'workshop',
+            project: projectInput || '',
             timeIn: '',
             timeOut: '',
             lunchDeduct: 1,
@@ -888,7 +888,7 @@ export default function IndividualReport({
       id: `temp-${empName}-${dStr}`,
       employeeName: empName,
       date: dStr,
-      project: projectInput || 'workshop',
+      project: projectInput || '',
       timeIn: '',
       timeOut: '',
       lunchDeduct: 1,
@@ -997,8 +997,8 @@ export default function IndividualReport({
       'OT 3.0 (hrs)',
       'OT Value (THB)',
       'Perdiem Expenses',
-      'Advance (THB)',
-      'Job Bonus (THB)',
+      'Confine / Other (THB)',
+      'Incentive (THB)',
       'Remark'
     ];
 
@@ -1016,7 +1016,14 @@ export default function IndividualReport({
 
       // Find public holiday
       const holidayCheck = holidays.find(h => h.holidayDate === dStr);
-      const remarkText = supp.remarkOverride || draft.remark || (holidayCheck ? holidayCheck.holidayName : '');
+      let projectText = draft.project || '';
+      if (projectText.toLowerCase() === 'workshop') {
+        projectText = '';
+      }
+      if (!(draft.timeIn && draft.timeOut)) {
+        projectText = '';
+      }
+      const remarkText = supp.remarkOverride || projectText || draft.remark || (holidayCheck ? holidayCheck.holidayName : '');
 
       return [
         dayName,
@@ -1116,7 +1123,14 @@ export default function IndividualReport({
 
       // Find public holiday
       const holidayCheck = holidays.find(h => h.holidayDate === dStr);
-      const remarkText = supp.remarkOverride || draft.remark || (holidayCheck ? holidayCheck.holidayName : '');
+      let projectText = draft.project || '';
+      if (projectText.toLowerCase() === 'workshop') {
+        projectText = '';
+      }
+      if (!(draft.timeIn && draft.timeOut)) {
+        projectText = '';
+      }
+      const remarkText = supp.remarkOverride || projectText || draft.remark || (holidayCheck ? holidayCheck.holidayName : '');
 
       return [
         dayName,
@@ -1814,8 +1828,8 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                     <th className="py-1.5 px-1 uppercase tracking-wider text-[9px] bg-slate-50" colSpan={3}>Working Time</th>
                     <th className="py-1.5 px-1 uppercase tracking-wider text-[9px] bg-slate-50" colSpan={4}>Overtime</th>
                     <th className="py-2 px-1 text-[9px] w-[75px]" rowSpan={2}>Perdiem<br/><span className="text-[7.5px] font-sans">/ Travel Exp</span></th>
-                    <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Advance</th>
-                    <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Job Bonus</th>
+                    <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Confine /<br/>Other</th>
+                    <th className="py-2 px-1 text-[9px] w-[65px]" rowSpan={2}>Incentive</th>
                     <th className="py-2.5 px-2 w-[150px]" rowSpan={2}>Job Reference / Remark</th>
                   </tr>
                   <tr className="divide-x divide-slate-450 divide-slate-400 text-[9.5px]">
@@ -1872,7 +1886,14 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                     // Checks Leave style
                     const defaultRemark = optHoliday ? optHoliday.holidayName : '';
-                    const finalRemark = supp.remarkOverride || draft.remark || defaultRemark;
+                    let projectText = draft.project || '';
+                    if (projectText.toLowerCase() === 'workshop') {
+                      projectText = '';
+                    }
+                    if (!(draft.timeIn && draft.timeOut)) {
+                      projectText = '';
+                    }
+                    const finalRemark = supp.remarkOverride || projectText || draft.remark || defaultRemark;
                     const labelLower = finalRemark.toLowerCase();
                     const isLeaveDay = labelLower.includes('leave') || labelLower.includes('ลา');
                     if (isLeaveDay) {
@@ -2427,7 +2448,14 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
 
                     // Checks Leave style
                     const defaultRemark = optHoliday ? optHoliday.holidayName : '';
-                    const finalRemark = supp.remarkOverride || draft.remark || defaultRemark;
+                    let projectText = draft.project || '';
+                    if (projectText.toLowerCase() === 'workshop') {
+                      projectText = '';
+                    }
+                    if (!(draft.timeIn && draft.timeOut)) {
+                      projectText = '';
+                    }
+                    const finalRemark = supp.remarkOverride || projectText || draft.remark || defaultRemark;
                     const labelLower = finalRemark.toLowerCase();
                     const isLeaveDay = labelLower.includes('leave') || labelLower.includes('ลา');
                     if (isLeaveDay) {
@@ -2746,7 +2774,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                     id: `draft-${dStr}`,
                     employeeName: empName,
                     date: dStr,
-                    project: projectInput || 'workshop',
+                    project: projectInput || '',
                     timeIn: '',
                     timeOut: '',
                     lunchDeduct: 1,
@@ -2857,7 +2885,7 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                   <div className="flex items-end gap-1">
                     <span className="font-extrabold text-slate-600 uppercase tracking-wider w-22 shrink-0">Project / Services:</span>
                     <span className="border-b border-dashed border-slate-900 pb-0.5 w-full font-bold text-slate-900 pl-1">
-                      {projectInput || 'workshop'}
+                      {projectInput || ''}
                     </span>
                   </div>
                 </div>
@@ -2873,8 +2901,8 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       <th className="py-0.5 px-0.5 bg-slate-50 font-mono" colSpan={3}>Working Time</th>
                       <th className="py-0.5 px-0.5 bg-slate-50 font-mono" colSpan={4}>Overtime</th>
                       <th className="py-1 px-0.5 text-[7.5px] w-[45px]" rowSpan={2}>Perdiem</th>
-                      <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Advance</th>
-                      <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Job Bonus</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Confine /<br/>Other</th>
+                      <th className="py-1 px-0.5 text-[7.5px] w-[40px]" rowSpan={2}>Incentive</th>
                       <th className="py-1 px-1 w-[80px]" rowSpan={2}>Job Ref</th>
                     </tr>
                     <tr className="divide-x divide-slate-400 font-sans text-[7.5px] select-none text-slate-800">
@@ -2925,7 +2953,14 @@ ALTER TABLE public."IndividualSupplements" DISABLE ROW LEVEL SECURITY;`);
                       }
 
                       const defaultRemark = optHoliday ? optHoliday.holidayName : '';
-                      const finalRemark = supp.remarkOverride || draft.remark || defaultRemark;
+                      let projectText = draft.project || '';
+                      if (projectText.toLowerCase() === 'workshop') {
+                        projectText = '';
+                      }
+                      if (!(draft.timeIn && draft.timeOut)) {
+                        projectText = '';
+                      }
+                      const finalRemark = supp.remarkOverride || projectText || draft.remark || defaultRemark;
                       const isLeaveDay = finalRemark.toLowerCase().includes('leave') || finalRemark.toLowerCase().includes('ลา');
                       if (isLeaveDay) {
                         rowBgClass = 'bg-orange-50/50';
