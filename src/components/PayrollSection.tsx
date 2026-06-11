@@ -210,7 +210,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
 
   // Compute calculated payroll for every employee
   const payrollDetails = useMemo(() => {
-    return employees.map(emp => {
+    const calculated = employees.map(emp => {
       // Find all timesheet records for this employee in the active period
       const empEntries = periodEntries.filter(
         entry => entry.employeeName.toLowerCase().trim() === emp.employeeName.toLowerCase().trim()
@@ -414,6 +414,8 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
         bankAccount: emp.bankAccount || 'xxx-xxx-xxxx'
       };
     });
+    // Filter to list only employees with timesheet entries for the current cycle
+    return calculated.filter(p => p.daysWorked > 0);
   }, [employees, periodEntries, allowances, deductions, customTaxes, customStudentLoans, settings, supplements]);
 
   // Overall sums to show in top summary rows
