@@ -352,7 +352,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
       });
 
       // Add user specified allowances
-      const extraAllowance = 0; // Force other income (กรอกเอง) to 0 always to prevent calculation errors
+      const extraAllowance = allowances[emp.id] || 0;
       const otherDeduction = deductions[emp.id] || 0;
 
       // Withholding Tax & Social Security calculations (Thai Standards)
@@ -587,7 +587,7 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
             OT15Wage: p.ot15Wage,
             OT20Wage: p.ot20Wage,
             OT30Wage: p.ot30Wage,
-            OtherIncome: 0, // Other Income (กรอกเอง) forced to 0 to prevent calculation errors
+            OtherIncome: allowances[p.id] || 0, // Other Income (กรอกเอง)
             OtherDeductions: p.otherDeduction, // Deduction (กรอกเอง)
             TaxDeduct: p.tax, // หักภาษี 3%
             SocialSecurity: p.sso, // หักประกันสังคม (2569)
@@ -963,8 +963,14 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                     </td>
 
                     {/* Other Income (กรอกเอง) */}
-                    <td className="py-2 px-3 text-center font-mono text-gray-400 dark:text-gray-500 font-bold select-none">
-                      0
+                    <td className="py-2 px-3 text-center">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={allowances[p.id] !== undefined ? allowances[p.id] : ''}
+                        onChange={(e) => setAllowances({ ...allowances, [p.id]: parseFloat(e.target.value) || 0 })}
+                        className={`w-20 text-[11px] px-1.5 py-1 text-right bg-transparent border rounded-sm focus:outline-hidden ${isDark ? 'border-white/10 text-amber-400 focus:border-[#D4AF37]' : 'border-slate-300 text-amber-700 font-bold focus:border-amber-600'}`}
+                      />
                     </td>
 
                     {/* Deduction (Other Deduction กรอกเอง) */}
