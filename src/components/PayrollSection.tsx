@@ -967,8 +967,17 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       <input
                         type="number"
                         placeholder="0"
-                        value={allowances[p.id] !== undefined ? allowances[p.id] : ''}
-                        onChange={(e) => setAllowances({ ...allowances, [p.id]: parseFloat(e.target.value) || 0 })}
+                        value={allowances[p.id] || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '' || parseFloat(val) === 0) {
+                            const updated = { ...allowances };
+                            delete updated[p.id];
+                            setAllowances(updated);
+                          } else {
+                            setAllowances({ ...allowances, [p.id]: parseFloat(val) || 0 });
+                          }
+                        }}
                         className={`w-20 text-[11px] px-1.5 py-1 text-right bg-transparent border rounded-sm focus:outline-hidden ${isDark ? 'border-white/10 text-amber-400 focus:border-[#D4AF37]' : 'border-slate-300 text-amber-700 font-bold focus:border-amber-600'}`}
                       />
                     </td>
@@ -978,8 +987,17 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       <input
                         type="number"
                         placeholder="0"
-                        value={deductions[p.id] !== undefined ? deductions[p.id] : ''}
-                        onChange={(e) => setDeductions({ ...deductions, [p.id]: parseFloat(e.target.value) || 0 })}
+                        value={deductions[p.id] || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '' || parseFloat(val) === 0) {
+                            const updated = { ...deductions };
+                            delete updated[p.id];
+                            setDeductions(updated);
+                          } else {
+                            setDeductions({ ...deductions, [p.id]: parseFloat(val) || 0 });
+                          }
+                        }}
                         className={`w-20 text-[11px] px-1.5 py-1 text-right bg-transparent border rounded-sm focus:outline-hidden ${isDark ? 'border-white/10 text-red-450 focus:border-red-500' : 'border-slate-300 text-red-600 font-bold focus:border-red-500'}`}
                       />
                     </td>
@@ -989,10 +1007,10 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       <input
                         type="number"
                         placeholder="0"
-                        value={customTaxes[p.id] !== undefined ? customTaxes[p.id] : p.tax}
+                        value={customTaxes[p.id] || ''}
                         onChange={(e) => {
                           const raw = e.target.value;
-                          if (raw === '') {
+                          if (raw === '' || parseFloat(raw) === 0) {
                             const updated = { ...customTaxes };
                             delete updated[p.id];
                             setCustomTaxes(updated);
@@ -1014,10 +1032,10 @@ export default function PayrollSection({ employees, entries, settings, isDark }:
                       <input
                         type="number"
                         placeholder="0"
-                        value={customStudentLoans[p.id] !== undefined ? customStudentLoans[p.id] : p.studentLoan}
+                        value={customStudentLoans[p.id] || ''}
                         onChange={(e) => {
                           const raw = e.target.value;
-                          if (raw === '') {
+                          if (raw === '' || parseFloat(raw) === 0) {
                             const updated = { ...customStudentLoans };
                             delete updated[p.id];
                             setCustomStudentLoans(updated);
