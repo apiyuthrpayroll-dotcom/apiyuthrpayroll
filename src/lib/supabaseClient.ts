@@ -193,16 +193,38 @@ export interface SupabaseSyncState {
 export async function dbFetchEmployees() {
   try {
     const tableName = await getTableRef('EmployeeRates', ['employeerates', 'employee_rates']);
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .order('EmployeeID', { ascending: true });
+    
+    let allData: any[] = [];
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
+    let iterations = 0; // Guard against infinite loop
 
-    if (error) throw error;
+    while (hasMore && iterations < 150) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .order('EmployeeID', { ascending: true })
+        .range(from, from + step - 1);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        hasMore = false;
+      } else {
+        allData = [...allData, ...data];
+        if (data.length < step) {
+          hasMore = false;
+        } else {
+          from += step;
+        }
+      }
+      iterations++;
+    }
     
     // Map database snake/Pascal case columns back to our App-level Employee interface
-    if (data) {
-      return data.map((item: any) => ({
+    if (allData.length > 0) {
+      return allData.map((item: any) => ({
         id: item.EmployeeID,
         employeeName: item.EmployeeName,
         staffSalary: Number(item.StaffSalary || 0),
@@ -300,15 +322,37 @@ export async function dbDeleteEmployee(id: string) {
 export async function dbFetchTimesheets() {
   try {
     const tableName = await getTableRef('TIMESHEET', ['timesheet', 'Timesheet']);
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .order('Date', { ascending: false });
+    
+    let allData: any[] = [];
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
+    let iterations = 0; // Guard against infinite loop
 
-    if (error) throw error;
+    while (hasMore && iterations < 150) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .order('Date', { ascending: false })
+        .range(from, from + step - 1);
 
-    if (data) {
-      return data.map((item: any) => ({
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        hasMore = false;
+      } else {
+        allData = [...allData, ...data];
+        if (data.length < step) {
+          hasMore = false;
+        } else {
+          from += step;
+        }
+      }
+      iterations++;
+    }
+
+    if (allData.length > 0) {
+      return allData.map((item: any) => ({
         id: item.ID,
         employeeName: item.EmployeeName,
         date: item.Date,
@@ -577,23 +621,46 @@ export async function dbFetchMonthlySummaries(startDate?: string, endDate?: stri
 export async function dbFetchSupplements() {
   try {
     const tableName = await getTableRef('IndividualSupplements', ['individual_supplements', 'individualsupplements', 'IndividualSupplements', 'supplements', 'supplements_individual']);
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('*');
+    
+    let allData: any[] = [];
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
+    let iterations = 0; // Guard against infinite loop
 
-    if (error) {
-      const errMsg = error.message || '';
-      const isTableErr = errMsg.includes('Invalid path') || 
-                         errMsg.toLowerCase().includes('not found') || 
-                         errMsg.toLowerCase().includes('does not exist');
-      if (isTableErr) {
-        console.warn('⚠️ Supabase IndividualSupplements warning (schema not loaded or table not created yet):', errMsg);
-      } else {
-        console.error('❌ Supabase IndividualSupplements fetch error:', errMsg);
+    while (hasMore && iterations < 150) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .range(from, from + step - 1);
+
+      if (error) {
+        const errMsg = error.message || '';
+        const isTableErr = errMsg.includes('Invalid path') || 
+                           errMsg.toLowerCase().includes('not found') || 
+                           errMsg.toLowerCase().includes('does not exist');
+        if (isTableErr) {
+          console.warn('⚠️ Supabase IndividualSupplements warning (schema not loaded or table not created yet):', errMsg);
+        } else {
+          console.error('❌ Supabase IndividualSupplements fetch error:', errMsg);
+        }
+        return null;
       }
-      return null;
+
+      if (!data || data.length === 0) {
+        hasMore = false;
+      } else {
+        allData = [...allData, ...data];
+        if (data.length < step) {
+          hasMore = false;
+        } else {
+          from += step;
+        }
+      }
+      iterations++;
     }
-    return data || [];
+
+    return allData;
   } catch (err: any) {
     const errMsg = err?.message || '';
     if (errMsg.includes('Invalid path') || errMsg.toLowerCase().includes('not found') || errMsg.toLowerCase().includes('does not exist')) {
