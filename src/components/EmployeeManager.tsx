@@ -2,12 +2,14 @@ import React, { useState, useMemo } from 'react';
 import { Employee } from '../types';
 import { 
   Search, UserPlus, Edit3, Check, X, 
-  Trash2, CreditCard
+  Trash2, CreditCard, Download, Upload, 
+  FileSpreadsheet, CheckCircle2, AlertCircle, FileText
 } from 'lucide-react';
 
 interface EmployeeManagerProps {
   employees: Employee[];
   onAddEmployee: (emp: Employee) => void;
+  onBulkAddEmployees?: (newEmps: Employee[]) => void;
   onUpdateEmployee: (id: string, updated: Partial<Employee>) => void;
   onDeleteEmployee: (id: string) => void;
   isDark?: boolean;
@@ -16,6 +18,7 @@ interface EmployeeManagerProps {
 export default function EmployeeManager({
   employees,
   onAddEmployee,
+  onBulkAddEmployees,
   onUpdateEmployee,
   onDeleteEmployee,
   isDark = true
@@ -44,6 +47,222 @@ export default function EmployeeManager({
     offshoreRate: 0,
     transportationRate: 0
   });
+
+  // Excel Excel Import & Export features state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importStatusMessage, setImportStatusMessage] = useState('');
+  const [parsedEmployees, setParsedEmployees] = useState<Employee[]>([]);
+
+  // Parser: Auto detect delimiter and convert Excel/TSV text to Employee objects
+  const parsePasteData = (text: string): Employee[] => {
+    if (!text.trim()) return [];
+    
+    // Split into lines
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
+    if (lines.length === 0) return [];
+
+    // Auto-detect CSV/TSV Delimiter
+    const firstLine = lines[0];
+    let delimiter = '\t';
+    if (firstLine.includes(',')) delimiter = ',';
+    else if (firstLine.includes(';')) delimiter = ';';
+
+    const rawRows = lines.map(line => line.split(delimiter).map(cell => cell.trim().replace(/^["']|["']$/g, '')));
+    
+    // Determine if the first row is header row
+    const isHeaderRow = (rowCells: string[]) => {
+      const sampleHeaders = ['id', 'name', 'รหัส', 'ชื่อ', 'fullName', 'position', 'ตำแหน่ง'];
+      return rowCells.some(cell => 
+        sampleHeaders.some(sh => cell.toLowerCase().includes(sh))
+      );
+    };
+
+    const hasHeader = isHeaderRow(rawRows[0]);
+    const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+    
+    // Convert to target employee array structure
+    const parsed: Employee[] = dataRows.map((row): Employee | null => {
+      if (row.length < 2 || !row[0] || !row[1]) return null;
+      
+      const id = row[0].toUpperCase().replace(/\s+/g, '');
+      const employeeName = row[1].toUpperCase();
+      
+      const scheduleRaw = (row[3] || '').toLowerCase();
+      let workScheduleType: 'daily_worker' | 'staff' = 'daily_worker';
+      if (scheduleRaw.includes('staff') || scheduleRaw.includes('เดือน') || scheduleRaw.includes('monthly') || scheduleRaw === 'staff') {
+        workScheduleType = 'staff';
+      }
+
+      const position = row[2] || (workScheduleType === 'staff' ? 'Technician' : 'Daily Worker');
+
+      const officeSalary = parseFloat(row[4]?.replace(/,/g, '')) || 0;
+      const workshopRate = parseFloat(row[5]?.replace(/,/g, '')) || 0;
+      const onsiteRate = parseFloat(row[6]?.replace(/,/g, '')) || 0;
+      const offshoreRate = parseFloat(row[7]?.replace(/,/g, '')) || 0;
+      const transportationRate = parseFloat(row[8]?.replace(/,/g, '')) || 0;
+      const bankName = row[9] || '';
+      const bankAccount = row[10] || '';
+      const studentLoan = parseFloat(row[11]?.replace(/,/g, '')) || 0;
+      
+      const flatRaw = (row[12] || '').toLowerCase();
+      const isFlatRate = flatRaw === 'yes' || flatRaw === 'true' || flatRaw.includes('ใช่') || flatRaw === 'y' || flatRaw === '1';
+
+      return {
+        id,
+        employeeName,
+        position,
+        workScheduleType,
+        officeSalary,
+        staffSalary: officeSalary,
+        workshopRate,
+        onsiteRate,
+        offshoreRate,
+        transportationRate,
+        bankName,
+        bankAccount,
+        studentLoan,
+        isFlatRate,
+        status: 'active' as const
+      };
+    }).filter((emp): emp is Employee => emp !== null);
+
+    return parsed;
+  };
+
+  // Trigger preview on raw text box modifications
+  const handlePasteChange = (text: string) => {
+    setImportText(text);
+    const parsed = parsePasteData(text);
+    setParsedEmployees(parsed);
+    if (parsed.length > 0) {
+      setImportStatusMessage(`✨ ตรวจพบพนักงานทั้งหมด ${parsed.length} คน ถูกวิเคราะห์พร้อมลงทะเบียนเรียบร้อย`);
+    } else {
+      setImportStatusMessage('');
+    }
+  };
+
+  // Upload spreadsheet CSV/TXT file picker
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        handlePasteChange(text);
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  // Submit parsed batch to application
+  const handleConfirmBatchImport = () => {
+    if (parsedEmployees.length === 0) {
+      alert('ไม่พบข้อมูลพนักงานสำหรับนำเข้า กรุณาวางหรืออัปโหลดข้อมูลงามๆ ก่อนครับ');
+      return;
+    }
+
+    if (onBulkAddEmployees) {
+      onBulkAddEmployees(parsedEmployees);
+      alert(`🎉 ประสบความสำเร็จ! ทำการนำเข้าทะเบียนข้อมูลพนักงานใหม่คราวละ ${parsedEmployees.length} คนปลอดภัยเรียบร้อย`);
+      setShowImportModal(false);
+      setImportText('');
+      setParsedEmployees([]);
+      setImportStatusMessage('');
+    } else {
+      alert('ขออภัย ฟีเจอร์ bulk นำเข้ายังไม่พร้อมทำงาน ปรึกษาผู้ดูแลระบบ');
+    }
+  };
+
+  // Export Template Excel-compliant UTF8 CSV containing instruction headers + dummy rows
+  const handleExportTemplate = () => {
+    const headers = [
+      'รหัสพนักงาน (ID)',
+      'ชื่อ-นามสกุลอังกฤษ (FullName)',
+      'ตำแหน่ง (Position)',
+      'ประเภทพนักงาน (daily_worker หรือ staff)',
+      'ฐานเงินเดือน (Office Salary)',
+      'ค่าจ้างปกติ/วัน (Workshop Rate)',
+      'Onsite Rate (บาท/วัน)',
+      'Offshore Rate (บาท/วัน)',
+      'ค่าขนส่งสวัสดิการ/วัน (Transportation Rate)',
+      'ชื่อธนาคารหลัก',
+      'เลขที่บัญชี',
+      'ยอดหัก กยศ. (Student Loan)',
+      'พนักงานควงกะ 12ชม. (yes หรือ no)'
+    ];
+
+    const sampleRows = [
+      ['EMP101', 'SOMCHAI DEEJA', 'Technician Service Eng', 'daily_worker', '0', '700', '750', '2500', '250', 'Kasikorn Bank', '123-4-56789-0', '0', 'no'],
+      ['EMP102', 'SARAWOOT KLAHAN', 'Project Supervisor', 'staff', '28000', '0', '0', '2800', '250', 'Siam Commercial Bank', '987-6-54321-0', '450', 'yes']
+    ];
+
+    const csvContent = [
+      headers.join(','),
+      ...sampleRows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    // pre-prepend UTF-8 Byte Order Mark for Thai and formatting support direct in MS Excel!
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'thai_ot_employee_import_template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Export CURRENT employee register to backup spreadsheet CSV
+  const handleExportCurrent = () => {
+    const headers = [
+      'รหัสพนักงาน (ID)',
+      'ชื่อ-นามสกุลอังกฤษ (FullName)',
+      'ตำแหน่ง (Position)',
+      'ประเภทพนักงาน (daily_worker หรือ staff)',
+      'ฐานเงินเดือน (Office Salary)',
+      'ค่าจ้างปกติ/วัน (Workshop Rate)',
+      'Onsite Rate (บาท/วัน)',
+      'Offshore Rate (บาท/วัน)',
+      'ค่าขนส่งสวัสดิการ/วัน (Transportation Rate)',
+      'ชื่อธนาคารหลัก',
+      'เลขที่บัญชี',
+      'ยอดหัก กยศ. (Student Loan)',
+      'พนักงานควงกะ 12ชม. (yes หรือ no)'
+    ];
+
+    const rows = employees.map(emp => [
+      emp.id,
+      emp.employeeName,
+      emp.position || '',
+      emp.workScheduleType || 'daily_worker',
+      (emp.officeSalary || emp.staffSalary || 0).toString(),
+      (emp.workshopRate || 0).toString(),
+      (emp.onsiteRate || 0).toString(),
+      (emp.offshoreRate || 0).toString(),
+      (emp.transportationRate || 0).toString(),
+      emp.bankName || '',
+      emp.bankAccount || '',
+      (emp.studentLoan || 0).toString(),
+      emp.isFlatRate ? 'yes' : 'no'
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `thai_ot_employees_register_export_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Filtered List
   const filtered = useMemo(() => {
@@ -162,14 +381,58 @@ export default function EmployeeManager({
             </select>
           </div>
 
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              id="export-template-btn"
+              type="button"
+              onClick={handleExportTemplate}
+              className={`px-3 py-1.5 border rounded-sm text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors ${
+                isDark ? 'border-white/10 hover:bg-white/5 text-gray-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+              }`}
+              title="ดาวน์โหลดไฟล์ Template Excel (.csv) ไปกรอกข้อมูลเพื่อสำหรับนำมาอัปโหลดล้างการป้อนพิกัดข้อมูลได้ทันที"
+            >
+              <Download className="w-3.5 h-3.5 text-[#D4AF37]" />
+              ดาวน์โหลด Template Excel
+            </button>
+
+            <button
+              id="export-employees-btn"
+              type="button"
+              onClick={handleExportCurrent}
+              className={`px-3 py-1.5 border rounded-sm text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors ${
+                isDark ? 'border-white/10 hover:bg-white/5 text-gray-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+              }`}
+              title="ส่งออกบัญชีรายชื่อพนักงานทั้งหมดปัจจุบันเป็นไฟล์ Excel/CSV สำหรับคัดสำเนารายชื่อได้ตรงกัน"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+              ส่งออกรายชื่อพนักงาน
+            </button>
+
+            <button
+              id="open-excel-import-btn"
+              type="button"
+              onClick={() => {
+                setShowImportModal(true);
+                setImportText('');
+                setParsedEmployees([]);
+                setImportStatusMessage('');
+              }}
+              className={`px-3 py-1.5 border rounded-sm text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors ${
+                isDark ? 'border-emerald-500/25 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-300' : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
+              }`}
+              title="นำเข้าอัตราค่าจ้างพนักงานพิกัด หรือข้อมูลธนาคารคราวละจำนวนจำกัด หรือจำนวนร้อยคนพร้อมกันได้โดนตรง"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              นำเข้าจาก Excel / CSV
+            </button>
+
             <button
               id="toggle-add-employee-form"
               onClick={() => setIsAdding(!isAdding)}
               className="px-3.5 py-1.5 bg-[#D4AF37] hover:bg-amber-500 text-black rounded-sm text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
             >
               <UserPlus className="w-4 h-4" />
-              ลงทะเบียนพนักงานใหม่ (Register New Employee)
+              {isAdding ? 'ปิดฟอร์มลงทะเบียน' : 'ลงทะเบียนรายคน'}
             </button>
           </div>
         </div>
@@ -659,6 +922,227 @@ export default function EmployeeManager({
           </table>
         </div>
       </div>
+
+      {/* Excel/CSV Import Modal popup */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className={`w-full max-w-4xl border rounded-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-fade-in ${
+            isDark ? 'bg-[#141414] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800'
+          }`}>
+            {/* Modal Header */}
+            <div className={`px-5 py-4 border-b flex items-center justify-between ${
+              isDark ? 'border-white/10 bg-[#1C1C1C]' : 'border-slate-100 bg-[#FAFAFA]'
+            }`}>
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-[#D4AF37]" />
+                <div>
+                  <h3 className={`text-sm font-bold uppercase tracking-wider ${textTitleClass}`}>
+                    นำเข้าข้อมูลพนักงานจาก Excel / Spreadsheet
+                  </h3>
+                  <p className="text-[10px] text-gray-500 font-medium">
+                    คัดลอกทั้งแถวจาก Excel แล้ววางที่ช่องด้านล่าง หรืออัปโหลดไฟล์ CSV เพื่อเพิ่มข้อมูลระดับความแม่นยำสูงพร้อมกัน
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowImportModal(false)}
+                className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded-sm cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <span className={`text-[11px] font-bold block ${textLabelClass}`}>
+                    ขั้นตอนที่ 1: วางข้อมูล (Clipboard) หรือเลือกไฟล์ (.csv, .tsv, .txt)
+                  </span>
+                  
+                  {/* File Upload Box */}
+                  <div className={`border-2 border-dashed rounded-md p-3 text-center transition-all ${
+                    isDark ? 'border-white/10 hover:border-[#D4AF37]/45 bg-[#0D0D0D]' : 'border-slate-300 hover:border-amber-500 bg-slate-50'
+                  }`}>
+                    <label className="cursor-pointer block space-y-1">
+                      <Upload className="w-6 h-6 mx-auto text-[#D4AF37]/75" />
+                      <span className="text-xs font-semibold block">คลิกที่นี่เพื่ออัปโหลดไฟล์ Excel / CSV</span>
+                      <span className="text-[10px] text-gray-500 block">รองรับไฟล์ชนิด UTF-8 Comma-separated เท่านั้น</span>
+                      <input 
+                        type="file" 
+                        accept=".csv,.txt,.tsv" 
+                        onChange={handleFileSelect} 
+                        className="hidden" 
+                      />
+                    </label>
+                  </div>
+
+                  {/* Clipboard Text Area */}
+                  <div className="space-y-1">
+                    <label className={`text-[10px] font-bold block ${textLabelClass}`}>หรือ คัดลอกข้อมูลพนักงานจากโปรแกรม Excel แล้วกดยิงวาง (Ctrl+V) ด้านล่าง:</label>
+                    <textarea
+                      id="excel-import-textarea"
+                      placeholder="เช่น:&#10;EMP101&#9;SOMCHAI DEEJA&#9;Technician&#9;daily_worker&#9;0&#9;700&#9;750&#9;2500&#9;250&#9;Kasikorn&#9;123-4-56789-0&#9;0&#9;no"
+                      value={importText}
+                      onChange={(e) => handlePasteChange(e.target.value)}
+                      className={`w-full h-44 text-xs font-mono p-3 rounded-md border focus:outline-hidden transition-all ${inputBgClass}`}
+                    />
+                  </div>
+                </div>
+
+                {/* System Specs instructions */}
+                <div className={`p-4 rounded-md border ${
+                  isDark ? 'bg-[#0D0D0D] border-white/5' : 'bg-slate-50 border-slate-200'
+                } space-y-3`}>
+                  <h4 className="text-xs font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4" />
+                    ลำดับคอลัมน์มาตรฐานสำหรับนำเข้า
+                  </h4>
+                  <p className="text-[10px] leading-relaxed text-gray-400">
+                    ในการนำเข้าข้อมูลที่สมบูรณ์ กรุณาจัดแถวคอลัมน์ใน Excel ให้ตรงตามลำดับดังต่อไปนี้ (จากซ้ายไปขวา):
+                  </p>
+                  
+                  <ol className="text-[10.5px] list-decimal list-inside space-y-1 text-gray-500 font-medium">
+                    <li><strong className={isDark ? "text-gray-300" : "text-slate-800"}>รหัสพนักงาน (ID)</strong> *จำเป็น (เช่น EMP101)</li>
+                    <li><strong className={isDark ? "text-gray-300" : "text-slate-800"}>ชื่อ-สกุลอังกฤษ (FullName)</strong> *จำเป็น</li>
+                    <li><strong>ตำแหน่ง (Position)</strong> (เช่น Daily Worker, Admin)</li>
+                    <li><strong>ประเภทกฎหมาย (WorkScheduleType)</strong> (ระบุ: <code className="font-mono bg-white/5 px-1 rounded text-amber-500">daily_worker</code> หรือ <code className="font-mono bg-white/5 px-1 rounded text-amber-500">staff</code>)</li>
+                    <li><strong>ฐานเงินเดือน (OfficeSalary)</strong> (ใส่ค่าเฉพาะรายเดือน)</li>
+                    <li><strong>Workshop Rate</strong> (บาท/วัน)</li>
+                    <li><strong>Onsite Rate</strong> (บาท/วัน)</li>
+                    <li><strong>Offshore Rate</strong> (บาท/วัน)</li>
+                    <li><strong>ค่ารถพิกัดสวัสดิการ</strong> (บาท/วัน)</li>
+                    <li><strong>ชื่อธนาคาร</strong> (เช่น Kasikorn Bank)</li>
+                    <li><strong>เลขบัญชีธนาคาร</strong> (เช่น 123-xxx-xxxx)</li>
+                    <li><strong>ยอดหักเงินกู้ กยศ.</strong> (ถ้ามีเช่น 500)</li>
+                    <li><strong>สิทธิ์ OT 12 ชม. (isFlatRate)</strong> (ระบุ: <code className="font-mono bg-white/5 px-1 rounded text-sky-400">yes</code> หรือ <code className="font-mono bg-white/5 px-1 rounded text-sky-400 font-bold">no</code>)</li>
+                  </ol>
+                  
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={handleExportTemplate}
+                      className="text-[10px] font-bold text-sky-500 hover:underline flex items-center gap-1"
+                    >
+                      <Download className="w-3 h-3" /> ดาวน์โหลดข้อมูลตัวอย่าง Template เปล่าเพื่อดูรูปแบบโครงสร้าง
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Message */}
+              {importStatusMessage && (
+                <div className={`p-3 rounded-md border text-xs flex items-center gap-2 ${
+                  parsedEmployees.length > 0 
+                  ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-400'
+                  : 'bg-red-950/20 border-red-500/20 text-red-400'
+                }`}>
+                  {parsedEmployees.length > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  )}
+                  <span>{importStatusMessage}</span>
+                </div>
+              )}
+
+              {/* Mapping Preview */}
+              {parsedEmployees.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className={`text-[11px] font-bold block ${textLabelClass}`}>
+                    ขั้นตอนที่ 2: ตารางวิเคราะห์แสดงรายการพนักงานที่ตรวจพบ ({parsedEmployees.length} คน)
+                  </span>
+                  
+                  <div className="border rounded-md overflow-hidden max-h-56 overflow-y-auto">
+                    <table className="w-full text-left text-[10px] border-collapse font-medium">
+                      <thead className={`${tableHeaderStyle} sticky top-0`}>
+                        <tr>
+                          <th className="py-1.5 px-2">รหัส</th>
+                          <th className="py-1.5 px-2">ชื่ออังกฤษ</th>
+                          <th className="py-1.5 px-2">ตำแหน่ง</th>
+                          <th className="py-1.5 px-2">ประเภท</th>
+                          <th className="py-1.5 px-2 text-right">เงินเดือน</th>
+                          <th className="py-1.5 px-2 text-right">Workshop</th>
+                          <th className="py-1.5 px-2 text-right">Onsite</th>
+                          <th className="py-1.5 px-2 text-right">Offshore</th>
+                          <th className="py-1.5 px-2 text-right">ค่ารถ</th>
+                          <th className="py-1.5 px-2 text-center">สิทธิ์ 12ชม.</th>
+                          <th className="py-1.5 px-2">ธนาคารหลัก / บัญชี</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-dotted">
+                        {parsedEmployees.map((emp, i) => (
+                          <tr key={i} className={isDark ? 'bg-white/[0.01]' : 'bg-slate-50'}>
+                            <td className="py-1.5 px-2 font-mono font-bold text-amber-500">{emp.id}</td>
+                            <td className="py-1.5 px-2 font-bold text-slate-800 dark:text-gray-300">{emp.employeeName}</td>
+                            <td className="py-1.5 px-2 text-gray-400">{emp.position}</td>
+                            <td className="py-1.5 px-2">
+                              <span className={`px-1 py-0.5 rounded text-[8.5px] font-bold text-white border ${
+                                emp.workScheduleType === 'staff' ? 'bg-blue-600/80' : 'bg-indigo-600/80'
+                              }`}>
+                                {emp.workScheduleType === 'staff' ? 'รายเดือน' : 'รายวัน'}
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-2 text-right font-mono text-gray-300">
+                              {emp.officeSalary ? emp.officeSalary.toLocaleString() + ' ฿' : '-'}
+                            </td>
+                            <td className="py-1.5 px-2 text-right font-mono text-sky-400">
+                              {emp.workshopRate ? emp.workshopRate.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-1.5 px-2 text-right font-mono text-purple-400">
+                              {emp.onsiteRate ? emp.onsiteRate.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-1.5 px-2 text-right font-mono text-amber-500">
+                              {emp.offshoreRate ? emp.offshoreRate.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-1.5 px-2 text-right font-mono text-gray-400">
+                              {emp.transportationRate ? emp.transportationRate.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-1.5 px-2 text-center">
+                              {emp.isFlatRate ? (
+                                <span className="text-emerald-500 text-[10px] font-bold font-mono">Yes</span>
+                              ) : (
+                                <span className="text-gray-600 dark:text-gray-400 text-[9px]">Normal</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 px-2 text-gray-400 max-w-xs truncate">
+                              {emp.bankName ? `${emp.bankName} (${emp.bankAccount})` : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className={`px-5 py-4 border-t flex justify-end gap-2 ${
+              isDark ? 'border-white/10 bg-[#1C1C1C]' : 'border-slate-100 bg-[#FAFAFA]'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className={`px-4 py-1.5 border rounded-sm text-xs font-semibold cursor-pointer transition-colors ${
+                  isDark ? 'border-white/10 text-gray-300 hover:bg-white/5 bg-transparent' : 'border-slate-300 text-slate-700 hover:bg-slate-100 bg-white'
+                }`}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={parsedEmployees.length === 0}
+                onClick={handleConfirmBatchImport}
+                className="px-5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-sm text-xs font-bold uppercase tracking-wider cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+              >
+                ยืนยันนำเข้าข้อมูลพนักงานทั้งหมดเข้าระบบ ({parsedEmployees.length} คน)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -86,7 +86,7 @@ export default function App() {
         // 1. Fetch Employees
         let activeEmployees: Employee[] = [];
         const dbEmps = await dbFetchEmployees();
-        if (dbEmps && dbEmps.length > 0) {
+        if (dbEmps !== null) {
           activeEmployees = dbEmps;
         } else {
           const savedEmployees = localStorage.getItem('thai_ot_employees');
@@ -118,7 +118,7 @@ export default function App() {
         // 3. Fetch Timesheets
         let activeEntries: TimesheetEntry[] = [];
         const dbTimesheets = await dbFetchTimesheets();
-        if (dbTimesheets && dbTimesheets.length > 0) {
+        if (dbTimesheets !== null) {
           activeEntries = dbTimesheets;
         } else {
           const savedEntries = localStorage.getItem('thai_ot_entries');
@@ -207,6 +207,24 @@ export default function App() {
     const list = [emp, ...employees];
     updateEmployeesAndSync(list);
     await dbUpsertEmployee(emp);
+  };
+
+  const handleBulkAddEmployees = async (newEmps: Employee[]) => {
+    let updatedList = [...employees];
+    for (const emp of newEmps) {
+      const idx = updatedList.findIndex(e => e.id === emp.id);
+      if (idx >= 0) {
+        updatedList[idx] = { ...updatedList[idx], ...emp };
+      } else {
+        updatedList.push(emp);
+      }
+    }
+    updateEmployeesAndSync(updatedList);
+    
+    // Save all to database asynchronously
+    for (const emp of newEmps) {
+      await dbUpsertEmployee(emp);
+    }
   };
 
   const handleUpdateEmployee = async (id: string, updated: Partial<Employee>) => {
@@ -413,7 +431,7 @@ export default function App() {
   const handleSyncFromDatabase = async () => {
     try {
       const dbTimesheets = await dbFetchTimesheets();
-      if (dbTimesheets && dbTimesheets.length > 0) {
+      if (dbTimesheets !== null) {
         updateEntriesAndSync(dbTimesheets);
       } else {
         const savedEntries = localStorage.getItem('thai_ot_entries');
@@ -709,6 +727,7 @@ export default function App() {
               <EmployeeManager
                 employees={employees}
                 onAddEmployee={handleAddEmployee}
+                onBulkAddEmployees={handleBulkAddEmployees}
                 onUpdateEmployee={handleUpdateEmployee}
                 onDeleteEmployee={handleDeleteEmployee}
                 isDark={isDark}

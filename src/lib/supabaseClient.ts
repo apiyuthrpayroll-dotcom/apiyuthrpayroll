@@ -243,7 +243,7 @@ export async function dbFetchEmployees() {
         isFlatRate: !!item.isFlatRate
       }));
     }
-    return null;
+    return [];
   } catch (err: any) {
     console.warn('⚡ Supabase EmployeeRates read warning:', err.message);
     return null;
@@ -372,7 +372,7 @@ export async function dbFetchTimesheets() {
         updatedAt: item.UpdatedAt
       }));
     }
-    return null;
+    return [];
   } catch (err: any) {
     console.warn('⚡ Supabase TIMESHEET read warning:', err.message);
     return null;
