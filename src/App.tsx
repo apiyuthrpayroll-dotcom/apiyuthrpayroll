@@ -410,6 +410,24 @@ export default function App() {
     updateEntriesAndSync([]);
   };
 
+  const handleSyncFromDatabase = async () => {
+    try {
+      const dbTimesheets = await dbFetchTimesheets();
+      if (dbTimesheets && dbTimesheets.length > 0) {
+        updateEntriesAndSync(dbTimesheets);
+      } else {
+        const savedEntries = localStorage.getItem('thai_ot_entries');
+        if (savedEntries) {
+          updateEntriesAndSync(JSON.parse(savedEntries));
+        } else {
+          updateEntriesAndSync(initialTimesheetEntries);
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Sync database error:', e);
+    }
+  };
+
   const isDark = theme === 'dark';
 
   return (
@@ -634,6 +652,7 @@ export default function App() {
               onDeleteEntry={handleDeleteEntry}
               onBulkAddEntries={handleBulkAddEntries}
               onClearAllEntries={handleClearAllEntries}
+              onSyncFromDatabase={handleSyncFromDatabase}
               isDark={isDark}
             />
           </div>

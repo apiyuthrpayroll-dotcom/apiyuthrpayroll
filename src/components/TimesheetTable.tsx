@@ -15,6 +15,7 @@ interface TimesheetTableProps {
   onDeleteEntry: (id: string) => void;
   onBulkAddEntries: (entries: TimesheetEntry[]) => void;
   onClearAllEntries: () => void;
+  onSyncFromDatabase?: () => void;
   isDark?: boolean;
 }
 
@@ -42,6 +43,7 @@ export default function TimesheetTable({
   onDeleteEntry,
   onBulkAddEntries,
   onClearAllEntries,
+  onSyncFromDatabase,
   isDark = false
 }: TimesheetTableProps) {
   // Action confirmation modal state
@@ -652,13 +654,24 @@ export default function TimesheetTable({
               <Check className="w-3.5 h-3.5" />
               อนุมัติทั้งหมด (Approve All)
             </button>
+            {onSyncFromDatabase && (
+              <button
+                id="sync-database-btn"
+                onClick={onSyncFromDatabase}
+                className="px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-sm text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all uppercase tracking-wider"
+                title="ดึงข้อมูลย้อนหลังกลับมาแสดงผลจากฐานข้อมูล Supabase"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                ดึงข้อมูลจาก Database
+              </button>
+            )}
             <button
               id="clear-all-timesheets-btn"
               onClick={() => {
                 setConfirmModal({
                   isOpen: true,
-                  title: 'ยืนยันเคลียร์ข้อมูลทั้งหมด',
-                  message: 'คุณแน่ใจหรือเปล่าที่จะล้าง (Clear) ข้อมูล Timesheet ทั้งหมดในหน้าจอนี้? การกระทำนี้จะลบข้อมูลที่แสดงอยู่ทั้งหมดจากระบบฟิสิคัลทันทีและไม่สามารถย้อนคืนได้',
+                  title: 'ยืนยันเคลียร์ข้อมูลบนหน้าจอ',
+                  message: 'คุณแน่ใจหรือเปล่าที่จะล้าง (Clear) รายการ Timesheet บนหน้าจอ? การกระทำนี้จะเป็นเพียงการล้างการแสดงผลบนหน้าจอชั่วคราวเท่านั้น โดยข้อมูลพนักงานและประวัติการทำงานจริงทั้งหมดจะยังคงอยู่และถูกเก็บบันทึกบนฐานข้อมูลออนไลน์ (Supabase) อย่างปลอดภัย คุณสามารถกด "ดึงข้อมูลจาก Database" เพื่อเรียกข้อมูลกลับคืนมาแสดงได้ตลอดเวลา',
                   actionType: 'clear_all'
                 });
               }}
