@@ -131,6 +131,9 @@ export default function TimesheetTable({
 
   // Filter lists
   const filteredEntries = useMemo(() => {
+    if (!startDateFilter || !endDateFilter) {
+      return [];
+    }
     return entries.filter(e => {
       const matchEmp = employeeFilter ? e.employeeName === employeeFilter : true;
       const matchProj = projectFilter ? e.project.toLowerCase().includes(projectFilter.toLowerCase()) : true;
@@ -1187,9 +1190,15 @@ export default function TimesheetTable({
                 })
               ) : (
                 <tr>
-                  <td colSpan={16} className="text-center py-10 text-gray-400">
-                    <AlertCircle className="w-6 h-6 mx-auto mb-2 text-[#D4AF37] animate-bounce" />
-                    ไม่พบรายการบันทึกเวลาทำงานในช่วงนี้
+                  <td colSpan={16} className="text-center py-12 text-slate-500 dark:text-gray-400">
+                    <AlertCircle className="w-7 h-7 mx-auto mb-2.5 text-[#D4AF37]" />
+                    {(!startDateFilter || !endDateFilter) ? (
+                      <span className="font-semibold text-xs text-[#D4AF37]">
+                        กรุณาระบุ "ช่วงวันที่" (วันที่เริ่มต้น และวันที่สิ้นสุด) ด้านบนให้ครบถ้วนก่อน เพื่อแสดงกล่องข้อมูลตารางรายการปฏิบัติงาน (Timesheet)
+                      </span>
+                    ) : (
+                      <span>ไม่พบรายการบันทึกเวลาทำงานในช่วงนี้</span>
+                    )}
                   </td>
                 </tr>
               )}
